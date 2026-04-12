@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+dist/
+build/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+
+# Next.js
+frontend/.next/
+frontend/node_modules/
+frontend/.env*.local
+
+# Credentials — never commit
+.env
+!.env.example
+
+# Local backup folder (may contain .env snapshots and pg_dump data)
+backup/
+
+# Runtime storage — large binaries
+storage/*
+!storage/.gitkeep
+!storage/previews/
+storage/previews/*
+!storage/previews/.gitkeep
+storage/smoke-tests/
+tmp/
+
+# Logs
+*.log
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Generated sample media
+sample_media/generated/*
+!sample_media/generated/.gitkeep

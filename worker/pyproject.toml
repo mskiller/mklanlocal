@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "media-indexer-worker"
+version = "0.1.0"
+description = "Background scan/index worker for the media indexer MVP"
+requires-python = ">=3.12"
+dependencies = [
+  "numpy>=2.1.0",
+  "opencv-contrib-python-headless>=4.10.0.84",
+  "Pillow>=11.0.0",
+  "pgvector>=0.3.5",
+  "psycopg[binary]>=3.2.0",
+  "sqlalchemy>=2.0.36",
+  "torch>=2.5.0",
+  "transformers>=4.46.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

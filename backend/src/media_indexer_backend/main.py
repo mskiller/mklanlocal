@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from media_indexer_backend.api.router import api_router
+from media_indexer_backend.core.config import get_settings
+from media_indexer_backend.core.logging import configure_logging
+from media_indexer_backend.db.session import SessionLocal
+from media_indexer_backend.services.source_service import ensure_system_sources
+from media_indexer_backend.services.user_service import ensure_seed_users
+
+
+configure_logging()
+settings = get_settings()
+
+app = FastAPI(title=settings.app_name, version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.frontend_origin],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.include_router(api_router)
+
+
+@app.on_event("startup")
+def seed_default_users() -> None:
+    with SessionLocal() as session:
+        ensure_seed_users(session)
+        ensure_system_sources(session)
+        session.commit()
