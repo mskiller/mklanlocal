@@ -1,6 +1,6 @@
 # MKLanLocal
 
-**"Mskiller note: This was totally done with AI, using both CLaude and CHatgpt, it was just a first test, and will improve, it still a lot buggy, but good for a first step. after those words, the rest is written by claude. and as code was written by both claude and gpt I could'nt say Author not could I :) "**
+**"Mskiller note: This was totally done with AI, using both Claude and Chatgpt, it was just a first test, and will improve, it still a lot buggy, but good for a first step. after those words, the restof the readme is written by claude. and as for the code, it was written by both claude and gpt I could'nt say Author's note, could I? :) "**
 
 > A self-hosted media indexer for your local photo and video library.  
 > Search, curate, and explore tens of thousands of images — all on your own hardware.
