@@ -44,7 +44,7 @@
 
 ```bash
 # 1. Clone
-git clone https://github.com/your-username/mklanlocal.git
+git clone https://github.com/mskiller/mklanlocal.git
 cd mklanlocal
 
 # 2. Create your environment file
