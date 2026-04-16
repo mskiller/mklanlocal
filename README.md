@@ -9,6 +9,36 @@
 
 ---
 
+## Screenshots
+
+### Browse Indexed — Gallery view
+Browse and curate your entire indexed library with filters, sort options, bulk-select, and collection shortcuts. Hover or long-press any tile for quick actions.
+
+![Browse Indexed gallery view](docs/screenshots/browse-indexed.png)
+
+### Asset Explorer — Detail & Inspector panel
+Click any image to open the full-screen explorer with a filmstrip, zoom controls, and an inspector panel showing the prompt, dimensions, file size, and modification date. Stage assets directly for side-by-side comparison.
+
+![Asset explorer with inspector panel](docs/screenshots/explorer-detail.png)
+
+### Scan Jobs — Real-time progress tracking
+Monitor all scan jobs in near real time: running, cancelled, and completed — with per-job counters for scanned, new, updated, deleted, and error counts.
+
+![Scan jobs dashboard](docs/screenshots/scan-jobs.png)
+
+---
+
+## What's new in v1.8
+
+- **Visual Workflow Graph** — Each asset now exposes its generation workflow as an interactive node graph (`VisualWorkflowGraph`). Embedded ComfyUI / A1111 workflow data is parsed and rendered directly in the asset detail page.
+- **Workflow export** — Export the workflow of any asset as a ready-to-import JSON file.
+- **Improved asset detail page** — New tabbed layout (`DetailTabs`) cleanly separates metadata, workflow, and similar-images panels.
+- **Search & browse enhancements** — Toast notifications, improved bulk-action bar, and smoother gallery tile interactions.
+- **New DB migration (`0007_visual_workflow`)** — Adds the columns needed to store and query parsed workflow data.
+- **Worker extractors updated** — The scan worker now extracts and persists embedded workflow JSON from PNG and WebP files during indexing.
+
+---
+
 ## Features
 
 | | |
