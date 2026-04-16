@@ -20,6 +20,7 @@ export function BulkActionBar({
     rating?: number | null;
     review_status?: ReviewStatus;
     flagged?: boolean;
+    tags?: string[];
   }) => {
     if (!selectedIds.length) return;
     setBusy(true);
@@ -48,6 +49,20 @@ export function BulkActionBar({
         <button className="button ghost-button small-button" disabled={busy} onClick={() => act({ rating: 4 })}>★★★★</button>
         <button className="button ghost-button small-button" disabled={busy} onClick={() => act({ rating: 3 })}>★★★</button>
         <button className="button ghost-button small-button" disabled={busy} onClick={() => act({ rating: null })}>Clear Rating</button>
+        <div className="vertical-divider" />
+        <button className="button small-button" style={{ backgroundColor: "#8b0000" }} disabled={busy} onClick={() => act({ tags: ["nsfw"] })}>🔞 NSFW</button>
+        <button 
+          className="button ghost-button small-button" 
+          disabled={busy} 
+          onClick={() => {
+            const tag = window.prompt("Enter tag name to add:");
+            if (tag && tag.trim()) {
+              void act({ tags: [tag.trim()] });
+            }
+          }}
+        >
+          🏷️ Add Tag...
+        </button>
       </div>
       <button className="button subtle-button small-button" disabled={busy} onClick={onClear}>Clear Selection</button>
     </div>

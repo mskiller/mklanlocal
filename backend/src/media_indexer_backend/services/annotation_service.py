@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from media_indexer_backend.models.tables import Asset, AssetAnnotation, User
+from media_indexer_backend.models.tables import Asset, AssetAnnotation, AssetTag, User
 from media_indexer_backend.schemas.asset import BulkAnnotateRequest
 
 
@@ -34,4 +34,17 @@ def bulk_annotate_assets(session: Session, payload: BulkAnnotateRequest, current
             annotation.flagged = payload.flagged
         if payload.note:
             annotation.note = f"{annotation.note}\n\n{payload.note}".strip() if annotation.note else payload.note
+        
+        if payload.tags:
+            for tag_str in payload.tags:
+                tag_str = tag_str.strip().lower()
+                if not tag_str:
+                    continue
+                # check if tag already exists for this asset to avoid primary key conflict
+                exists = session.execute(
+                    select(AssetTag).where(AssetTag.asset_id == asset_id, AssetTag.tag == tag_str)
+                ).scalar_one_or_none()
+                if not exists:
+                    session.add(AssetTag(asset_id=asset_id, tag=tag_str))
+                    
     session.flush()

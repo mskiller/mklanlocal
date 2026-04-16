@@ -117,6 +117,11 @@ class Asset(Base):
     indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     preview_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     blur_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    
+    # Visual Workflow Extraction (v1.8 Expansion)
+    visual_workflow_json: Mapped[dict | list | None] = mapped_column(postgresql.JSONB, nullable=True)
+    visual_workflow_confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    visual_workflow_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     source: Mapped[Source] = relationship(back_populates="assets")
     metadata_record: Mapped["AssetMetadata | None"] = relationship(

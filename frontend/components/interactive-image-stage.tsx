@@ -72,11 +72,11 @@ export function InteractiveImageStage({
       : undefined;
 
   return (
-    <div ref={stageShellRef} className="interactive-image-stage-shell">
+    <div ref={stageShellRef} className="interactive-image-stage-shell" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div
         ref={stageRef}
         className={`interactive-image-stage ${dragging ? "interactive-image-stage-dragging" : ""} ${className}`.trim()}
-        style={stageStyle}
+        style={{ ...stageStyle, flex: 1, minHeight: 0 }}
         {...stageProps}
       >
         <img

@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 
 import { AuthProvider } from "@/components/auth-provider";
+import { SettingsProvider } from "@/components/settings-provider";
+import { ToastProvider } from "@/components/use-toast";
+import { ToastContainer } from "@/components/ToastContainer";
 
 import "./globals.css";
 
@@ -13,7 +16,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <SettingsProvider>
+          <ToastProvider>
+            <AuthProvider>{children}</AuthProvider>
+            <ToastContainer />
+          </ToastProvider>
+        </SettingsProvider>
       </body>
     </html>
   );

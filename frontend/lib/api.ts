@@ -61,7 +61,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 function buildQuery<T extends object>(filters: T): string {
   const params = new URLSearchParams();
   Object.entries(filters as Record<string, string | number | boolean | null | undefined>).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === "") {
+    if (value === undefined || value === null || value === "" || value === false) {
       return;
     }
     params.set(key, String(value));
@@ -70,8 +70,8 @@ function buildQuery<T extends object>(filters: T): string {
   return query ? `?${query}` : "";
 }
 
-export function mediaUrl(path: string | null): string | null {
-  return path ? `${API_BASE_URL}${path}` : null;
+export function mediaUrl(path: string | null | undefined): string | undefined {
+  return path ? `${API_BASE_URL}${path}` : undefined;
 }
 
 export function assetImageUrl(id: string, options: { w?: number; h?: number; quality?: number; fmt?: "webp" | "jpeg" } = {}) {
@@ -157,7 +157,7 @@ export function fetchAssets(filters: SearchFilters = {}) {
   return request<AssetListResponse>(`/assets${buildQuery(filters)}`);
 }
 
-export function fetchAssetBrowse(filters: { source_id?: string; sort?: string; page?: number; page_size?: number } = {}) {
+export function fetchAssetBrowse(filters: { source_id?: string; sort?: string; page?: number; page_size?: number; exclude_tags?: string } = {}) {
   const query = buildQuery(filters);
   return request<AssetBrowseResponse>(`/assets/browse${query}`);
 }
@@ -192,6 +192,7 @@ export function bulkAnnotateAssets(payload: {
   review_status?: string | null;
   flagged?: boolean | null;
   note?: string | null;
+  tags?: string[] | null;
 }) {
   return request<void>("/assets/bulk-annotate", {
     method: "POST",
@@ -420,4 +421,44 @@ export async function uploadToSource(id: string, files: File[], folder = "") {
     throw new Error(body?.detail ?? "Upload failed.");
   }
   return parseResponse<SourceUploadResponse>(response);
+}
+
+/** M4 — Auth-aware workflow download; avoids 401 on JWT setups */
+export async function downloadWorkflow(assetId: string, filename: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/assets/${assetId}/workflow/download`, {
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error("Workflow download failed.");
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename.endsWith(".json") ? filename : `${filename}_workflow.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export async function downloadWorkflowFromFile(assetId: string, filename: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/assets/${assetId}/workflow/extract-from-file`, {
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const body = response.headers.get("content-type")?.includes("application/json")
+      ? await response.json()
+      : null;
+    throw new Error(body?.detail ?? "No workflow found in file.");
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename.endsWith(".json") ? filename : `${filename}_workflow.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

@@ -96,7 +96,7 @@ export function JustifiedGallery({
   );
 
   return (
-    <div ref={containerRef} className={`justified-gallery ${className}`.trim()}>
+    <div ref={containerRef} className={`justified-gallery ${className}`.trim()} style={{ minWidth: 0, overflow: "hidden" }}>
       {rows.map((row) => (
         <div key={row.key} className="justified-gallery-row" style={{ gap: `${gap}px`, minHeight: `${row.height}px` }}>
           {row.items.map((item) => (

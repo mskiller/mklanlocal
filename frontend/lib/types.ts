@@ -166,6 +166,7 @@ export interface AssetSummary {
   tags: string[];
   normalized_metadata: Record<string, unknown>;
   annotation: AssetAnnotation | null;
+  workflow_export_available: boolean;
 }
 
 export interface AssetDetail extends AssetSummary {
@@ -173,6 +174,12 @@ export interface AssetDetail extends AssetSummary {
   source_name: string;
   workflow_export_available: boolean;
   workflow_export_url: string | null;
+  visual_workflow_json?: {
+    nodes: any[];
+    edges: any[];
+  } | null;
+  visual_workflow_confidence?: number | null;
+  visual_workflow_updated_at?: string | null;
 }
 
 export interface AssetListResponse {
@@ -217,6 +224,7 @@ export interface AssetBrowseItem {
   prompt_tags: string[];
   prompt_tag_string: string | null;
   annotation: AssetAnnotation | null;
+  workflow_export_available: boolean;
 }
 
 export interface AssetBrowseResponse {
@@ -325,6 +333,7 @@ export interface SearchFilters {
   duration_min?: string;
   duration_max?: string;
   tags?: string;
+  exclude_tags?: string;
   min_rating?: number;
   review_status?: ReviewStatus;
   flagged?: boolean;

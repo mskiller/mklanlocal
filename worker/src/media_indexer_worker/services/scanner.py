@@ -25,7 +25,8 @@ from media_indexer_backend.services.metadata import (
 )
 from media_indexer_backend.services.path_safety import validate_source_root
 from media_indexer_backend.services.source_service import reconcile_source_statuses
-from media_indexer_worker.services.extractors import extract_exiftool, extract_ffprobe
+from media_indexer_worker.services.extractors import extract_exiftool, extract_ffprobe, extract_png_metadata_chunks
+from media_indexer_worker.services.nsfw import NsfwDetectorService
 from media_indexer_worker.services.previews import PreviewGenerator
 from media_indexer_worker.services.similarity import SimilarityService
 
@@ -38,6 +39,7 @@ class ScanWorker:
         self.settings = get_settings()
         self.previews = PreviewGenerator()
         self.similarity = SimilarityService()
+        self.nsfw_detector = NsfwDetectorService()
 
     def run_forever(self) -> None:
         logger.info("worker loop started")
@@ -251,6 +253,8 @@ class ScanWorker:
 
         if existing and not needs_metadata_refresh:
             return
+            
+        old_tags = [t.tag for t in existing.tags] if existing else []
 
         if job.message != f"Extracting metadata: {relative_path}":
             job.message = f"Extracting metadata: {relative_path}"
@@ -258,6 +262,11 @@ class ScanWorker:
 
         checksum = existing.checksum if existing and not content_changed and existing.checksum else compute_sha256(path)
         exif = extract_exiftool(path)
+        if path.suffix.lower() == ".png":
+            png_chunks = extract_png_metadata_chunks(path)
+            for key, value in png_chunks.items():
+                exif.setdefault(key, value)
+        
         ffprobe = extract_ffprobe(path) if media_type == MediaType.VIDEO else {}
         normalized = normalize_metadata(media_type=media_type, exif=exif, ffprobe=ffprobe)
         created_at = parse_datetime(normalized.get("created_at")) or filesystem_created_at
@@ -315,6 +324,18 @@ class ScanWorker:
             )
 
         tags = build_tags(normalized, exif)
+        
+        if media_type == MediaType.IMAGE:
+            if existing and not content_changed:
+                if "nsfw" in old_tags and "nsfw" not in tags:
+                    tags.append("nsfw")
+            else:
+                if job.message != f"Checking NSFW: {relative_path}":
+                    job.message = f"Checking NSFW: {relative_path}"
+                    session.commit()
+                if self.nsfw_detector.detect_nsfw(path) and "nsfw" not in tags:
+                    tags.append("nsfw")
+
         if tags:
             session.add_all([AssetTag(asset_id=asset.id, tag=tag) for tag in tags])
 

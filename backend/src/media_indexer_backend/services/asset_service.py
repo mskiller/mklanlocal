@@ -27,7 +27,7 @@ from media_indexer_backend.services.metadata import (
     score_from_distance,
 )
 from media_indexer_backend.services.user_service import capabilities_for_user
-from media_indexer_backend.services.workflow_export import build_comfyui_workflow_export
+from media_indexer_backend.services.workflow_export import build_workflow_export
 
 
 def _allowed_source_ids(session: Session, current_user: User | None):
@@ -63,6 +63,23 @@ def _annotation_for_asset(asset: Asset, user_id: UUID | None) -> AssetAnnotation
     return None
 
 
+def _is_workflow_export_available(asset: Asset) -> bool:
+    if not asset.metadata_record:
+        return False
+    normalized = asset.metadata_record.normalized_json or {}
+    raw_meta = asset.metadata_record.raw_json or {}
+
+    # ComfyUI
+    if normalized.get("generator") == "comfyui":
+        return bool(raw_meta.get("Prompt") or raw_meta.get("Workflow"))
+    
+    # A1111
+    if normalized.get("generator") == "automatic1111":
+        return bool(normalized.get("workflow_text"))
+    
+    return False
+
+
 def _asset_summary(asset: Asset, user_id: UUID | None = None) -> AssetSummary:
     normalized = normalized_metadata_for_api(asset.metadata_record.normalized_json if asset.metadata_record else {})
     return AssetSummary(
@@ -85,12 +102,14 @@ def _asset_summary(asset: Asset, user_id: UUID | None = None) -> AssetSummary:
         tags=sorted(tag.tag for tag in asset.tags),
         normalized_metadata=normalized,
         annotation=_annotation_for_asset(asset, user_id),
+        workflow_export_available=_is_workflow_export_available(asset),
     )
 
 
 def asset_browse_item(asset: Asset, user_id: UUID | None = None) -> AssetBrowseItem:
     normalized = normalized_metadata_for_api(asset.metadata_record.normalized_json if asset.metadata_record else {})
     tags = prompt_tags_from_normalized(normalized)
+    workflow_available = _is_workflow_export_available(asset)
     return AssetBrowseItem(
         id=asset.id,
         source_id=asset.source_id,
@@ -112,6 +131,7 @@ def asset_browse_item(asset: Asset, user_id: UUID | None = None) -> AssetBrowseI
         prompt_tags=tags,
         prompt_tag_string=prompt_tag_string(tags),
         annotation=_annotation_for_asset(asset, user_id),
+        workflow_export_available=workflow_available,
     )
 
 
@@ -138,19 +158,11 @@ def get_asset_detail(session: Session, asset_id: UUID, current_user: User | None
     asset = get_asset_or_404(session, asset_id, current_user=current_user)
     summary = _asset_summary(asset, user_id=current_user.id if current_user else None)
     raw_metadata = asset.metadata_record.raw_json if asset.metadata_record else {}
-    normalized_metadata = normalized_metadata_for_api(asset.metadata_record.normalized_json if asset.metadata_record else {})
-    workflow_export = build_comfyui_workflow_export(
-        asset_id=str(asset.id),
-        filename=asset.filename,
-        normalized_metadata=normalized_metadata,
-        raw_metadata=raw_metadata,
-    )
     return AssetDetail(
         **summary.model_dump(),
         raw_metadata=raw_metadata,
         source_name=asset.source.name,
-        workflow_export_available=workflow_export is not None,
-        workflow_export_url=f"/assets/{asset.id}/workflow/download" if workflow_export is not None else None,
+        workflow_export_url=f"/assets/{asset.id}/workflow/download" if summary.workflow_export_available else None,
     )
 
 
@@ -169,6 +181,7 @@ def _apply_search_filters(
     duration_min: float | None,
     duration_max: float | None,
     tags: list[str],
+    exclude_tags: list[str] | None,
     min_rating: int | None,
     review_status: ReviewStatus | None,
     flagged: bool | None,
@@ -202,11 +215,15 @@ def _apply_search_filters(
         conditions.append(annotation_alias.rating >= min_rating)
     if review_status is not None and annotation_alias is not None:
         conditions.append(annotation_alias.review_status == review_status)
-    if flagged is not None and annotation_alias is not None:
-        conditions.append(annotation_alias.flagged == flagged)
+    if flagged is True and annotation_alias is not None:
+        conditions.append(annotation_alias.flagged == True)
     for tag in [tag.strip().lower() for tag in tags if tag.strip()]:
         subquery = select(AssetTag.asset_id).where(AssetTag.tag == tag)
         conditions.append(Asset.id.in_(subquery))
+    if exclude_tags:
+        for tag in [tag.strip().lower() for tag in exclude_tags if tag.strip()]:
+            subquery = select(AssetTag.asset_id).where(AssetTag.tag == tag)
+            conditions.append(Asset.id.notin_(subquery))
 
     if q:
         ts_query = func.plainto_tsquery("simple", q)
@@ -244,6 +261,7 @@ def search_assets(
     duration_min: float | None,
     duration_max: float | None,
     tags: list[str],
+    exclude_tags: list[str] | None = None,
     min_rating: int | None,
     review_status: ReviewStatus | None,
     flagged: bool | None,
@@ -282,6 +300,7 @@ def search_assets(
         duration_min=duration_min,
         duration_max=duration_max,
         tags=tags,
+        exclude_tags=exclude_tags,
         min_rating=min_rating,
         review_status=review_status,
         flagged=flagged,
@@ -301,6 +320,7 @@ def search_assets(
         duration_min=duration_min,
         duration_max=duration_max,
         tags=tags,
+        exclude_tags=exclude_tags,
         min_rating=min_rating,
         review_status=review_status,
         flagged=flagged,
@@ -341,6 +361,7 @@ def matching_asset_ids_for_search(
     duration_min: float | None,
     duration_max: float | None,
     tags: list[str],
+    exclude_tags: list[str] | None = None,
     min_rating: int | None = None,
     review_status: ReviewStatus | None = None,
     flagged: bool | None = None,
@@ -365,6 +386,7 @@ def matching_asset_ids_for_search(
         duration_min=duration_min,
         duration_max=duration_max,
         tags=tags,
+        exclude_tags=exclude_tags,
         min_rating=min_rating,
         review_status=review_status,
         flagged=flagged,
@@ -382,6 +404,7 @@ def browse_assets(
     session: Session,
     *,
     source_id: UUID | None,
+    exclude_tags: list[str] | None = None,
     min_rating: int | None,
     review_status: ReviewStatus | None,
     flagged: bool | None,
@@ -417,6 +440,12 @@ def browse_assets(
     if flagged is not None and annotation_alias is not None:
         base_query = base_query.where(annotation_alias.flagged == flagged)
         count_query = count_query.where(annotation_alias.flagged == flagged)
+
+    if exclude_tags:
+        for tag in [tag.strip().lower() for tag in exclude_tags if tag.strip()]:
+            subquery = select(AssetTag.asset_id).where(AssetTag.tag == tag)
+            base_query = base_query.where(Asset.id.notin_(subquery))
+            count_query = count_query.where(Asset.id.notin_(subquery))
 
     if sort == "created_at":
         base_query = base_query.order_by(desc(Asset.created_at), desc(Asset.modified_at), Asset.filename)
@@ -468,6 +497,7 @@ def get_assets_for_tag(session: Session, tag: str, page: int, page_size: int, cu
         duration_min=None,
         duration_max=None,
         tags=[tag],
+        exclude_tags=None,
         min_rating=None,
         review_status=None,
         flagged=None,

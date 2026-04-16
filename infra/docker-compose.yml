@@ -52,7 +52,7 @@ services:
       #   source: /path/to/your/photos      # absolute path on the host
       #   target: /data/sources/photos      # how it appears inside the app
       #   read_only: true
- 
+
   worker:
     build:
       context: ..
@@ -88,6 +88,7 @@ services:
       #   source: /path/to/your/photos
       #   target: /data/sources/photos
       #   read_only: true
+   
   frontend:
     build:
       context: ..

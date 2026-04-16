@@ -13,6 +13,8 @@ RUN apt-get update \
         ffmpeg \
         libgl1 \
         libglib2.0-0 \
+        tesseract-ocr \
+        tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/pyproject.toml /workspace/backend/pyproject.toml

@@ -3,6 +3,23 @@
 All notable changes to MKLanLocal are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] — 2026-04-14
+
+### Fixed
+
+- **Image clicks blocked by overlay** — `gallery-status-badge` had no `pointer-events: none`, making it intercept taps in the top-left corner of every tile on mobile. The badge is purely cosmetic; it now passes all pointer events through to the image button beneath it.
+- **Search page shows no results on first open** — Default sort was `relevance`, which returns 0 results when there is no query string. Default is now `modified_at` so the page always populates with images on load. The `SearchPageContent` component also auto-corrects any `?sort=relevance` URL param to `modified_at` when the query is empty.
+- **Mobile filter panel unscrollable** — On viewports ≤ 900 px the filter sidebar now renders as a `BottomSheet` (the same component used by gallery long-press menus), giving it native-scroll, drag-to-dismiss, and a proper safe-area-inset footer. The old fixed slide-panel remains on desktop.
+- **Filter inputs too small on mobile** — Added `min-height: 44px; font-size: 1rem` to `.field input` and `.field select` inside the `@media (max-width: 1024px)` block to hit Apple/Google tap-target guidelines and prevent iOS auto-zoom on focus.
+
+### Added
+
+- **File Explorer page** (`/sources/:id/explorer`) — A Windows-Explorer-style two-pane page: a collapsible folder tree on the left (lazy-loads children via the existing `/sources/:id/tree` API), and a folder contents panel on the right showing subfolder tiles and an image summary. From any folder you can:
+  - Navigate the full directory hierarchy without leaving the page.
+  - Click **📌 Index This Folder as Source** to immediately create a scoped source from the selected subfolder (requires `can_manage_sources`).
+  - Open the **Gallery View** for that exact path in the existing live-browse page.
+- **Explorer entry points** — A `📁 File Explorer` button now appears in the source list cards (Sources page) and in the header actions of the source gallery page, so the new page is always one tap away.
+
 ## [1.0.0] — 2026-04-13 — First public release
 
 Initial open-source release. Covers all features developed through internal versions v1–v3.

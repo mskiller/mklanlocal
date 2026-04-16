@@ -25,6 +25,7 @@ class BulkAnnotateRequest(BaseModel):
     review_status: ReviewStatus | None = None
     flagged: bool | None = None
     note: str | None = None
+    tags: list[str] | None = None
 
 
 class AssetSummary(BaseModel):
@@ -47,6 +48,7 @@ class AssetSummary(BaseModel):
     tags: list[str]
     normalized_metadata: dict
     annotation: AssetAnnotationRead | None = None
+    workflow_export_available: bool = False
 
 
 class AssetDetail(AssetSummary):
@@ -54,6 +56,9 @@ class AssetDetail(AssetSummary):
     source_name: str
     workflow_export_available: bool
     workflow_export_url: str | None
+    visual_workflow_json: dict | list | None = None
+    visual_workflow_confidence: float | None = None
+    visual_workflow_updated_at: datetime | None = None
 
 
 class AssetListResponse(BaseModel):
@@ -84,6 +89,7 @@ class AssetBrowseItem(BaseModel):
     prompt_tags: list[str]
     prompt_tag_string: str | None
     annotation: AssetAnnotationRead | None = None
+    workflow_export_available: bool = False
 
 
 class AssetBrowseResponse(BaseModel):

@@ -25,3 +25,21 @@ export async function copyTextToClipboard(value: string): Promise<boolean> {
   document.body.removeChild(input);
   return success;
 }
+
+/** M5.4 — Copy an image URL to the clipboard using ClipboardItem API */
+export async function copyImageToClipboard(imgSrc: string): Promise<boolean> {
+  try {
+    const response = await fetch(imgSrc, { credentials: "include" });
+    if (!response.ok) return false;
+    const blob = await response.blob();
+    const mimeType = blob.type || "image/png";
+    if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      const item = new ClipboardItem({ [mimeType]: blob });
+      await navigator.clipboard.write([item]);
+      return true;
+    }
+  } catch {
+    // ClipboardItem not supported (Firefox) — fall through
+  }
+  return false;
+}

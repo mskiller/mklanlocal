@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 
 import { BlurhashPlaceholder } from "@/components/blurhash-placeholder";
 import { TagFilterChip } from "@/components/tag-filter-chip";
+import { BottomSheet } from "@/components/BottomSheet";
 
 export interface GalleryTileAction {
   label: string;
@@ -32,6 +33,7 @@ export function GalleryTile({
   tileStyle,
   imageButtonStyle,
   onImageLoad,
+  workflowAvailable,
 }: {
   imageSrc: string | null;
   blurHash?: string | null;
@@ -51,13 +53,17 @@ export function GalleryTile({
   tileStyle?: CSSProperties;
   imageButtonStyle?: CSSProperties;
   onImageLoad?: (size: { width: number; height: number }) => void;
+  workflowAvailable?: boolean;
 }) {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const menuOpen = menuPos !== null;
   const [loaded, setLoaded] = useState(false);
+  const [isInspecting, setIsInspecting] = useState(false);
+  const [bottomSheetOpen, setBottomSheetOpen] = useState(false);
   const longPressTimer = useRef<number | null>(null);
   const longPressTriggered = useRef(false);
   const tileRef = useRef<HTMLElement | null>(null);
+  const isMobile = typeof window !== "undefined" && "ontouchstart" in window;
 
   useEffect(() => {
     setLoaded(false);
@@ -68,7 +74,12 @@ export function GalleryTile({
       return;
     }
     const handlePointerDown = (event: PointerEvent) => {
+      // Don't close if clicking inside the tile itself
       if (tileRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      // Don't close if clicking inside the context menu portal
+      if ((event.target as Element).closest?.(".gallery-context-menu")) {
         return;
       }
       setMenuPos(null);
@@ -86,6 +97,7 @@ export function GalleryTile({
       return;
     }
     setMenuPos(null);
+    setBottomSheetOpen(false);
     action.onSelect();
   };
 
@@ -94,7 +106,12 @@ export function GalleryTile({
       ref={tileRef}
       className={`gallery-tile ${selected ? "gallery-tile-selected" : ""} ${className}`.trim()}
       style={tileStyle}
-      onMouseEnter={triggerInspect}
+      data-inspecting={isInspecting || menuOpen ? "true" : undefined}
+      onMouseEnter={() => {
+        setIsInspecting(true);
+        triggerInspect();
+      }}
+      onMouseLeave={() => setIsInspecting(false)}
       onContextMenu={(event) => {
         event.preventDefault();
         triggerInspect();
@@ -126,7 +143,7 @@ export function GalleryTile({
               event.preventDefault();
               return;
             }
-            if (selectionMode && onToggleSelect) {
+            if ((event.ctrlKey || event.metaKey || selectionMode) && onToggleSelect) {
               event.preventDefault();
               onToggleSelect();
               return;
@@ -134,7 +151,7 @@ export function GalleryTile({
             onOpen();
           }}
           onTouchStart={(event) => {
-            triggerInspect();
+            // Do NOT call triggerInspect() here — that blocks tap-to-open on mobile
             longPressTriggered.current = false;
             if (longPressTimer.current) {
               window.clearTimeout(longPressTimer.current);
@@ -142,7 +159,12 @@ export function GalleryTile({
             const touch = event.touches[0];
             longPressTimer.current = window.setTimeout(() => {
               longPressTriggered.current = true;
-              setMenuPos({ x: touch.clientX, y: touch.clientY });
+              triggerInspect();
+              if (isMobile) {
+                setBottomSheetOpen(true);
+              } else {
+                setMenuPos({ x: touch.clientX, y: touch.clientY });
+              }
             }, 420);
           }}
           onTouchEnd={() => {
@@ -160,11 +182,17 @@ export function GalleryTile({
         >
           {imageSrc ? (
             <>
-              {!loaded && blurHash ? <BlurhashPlaceholder hash={blurHash} className="gallery-blurhash" /> : null}
+              {!loaded && blurHash ? (
+                <BlurhashPlaceholder hash={blurHash} className="gallery-blurhash" />
+              ) : null}
+              {!loaded && !blurHash ? (
+                <div className="gallery-blurhash-missing" />
+              ) : null}
               <img
                 src={imageSrc}
                 alt={alt}
                 loading="lazy"
+                className={!loaded ? "gallery-img-loading" : ""}
                 style={{ opacity: loaded ? 1 : 0 }}
                 onLoad={(event) => {
                   setLoaded(true);
@@ -179,62 +207,85 @@ export function GalleryTile({
             <div className="asset-placeholder">image</div>
           )}
         </button>
+        {workflowAvailable && (
+          <span
+            className="gallery-workflow-badge"
+            title="Workflow embedded"
+            aria-label="Workflow available"
+          >
+            ⚡
+          </span>
+        )}
+        {/* Lightweight overlay — filename + badge + max 3 tags; pointer-events: none always */}
         <div className={`gallery-overlay ${menuOpen ? "gallery-overlay-visible" : ""}`}>
           <div className="gallery-overlay-top">
             <strong>{title}</strong>
             {subtitle ? <span>{subtitle}</span> : null}
           </div>
-          <div className="gallery-overlay-body">
-            {promptExcerpt ? <p>{promptExcerpt}</p> : null}
-            {promptTags.length ? (
-              <div className="chip-row gallery-overlay-tags">
-                {promptTags.slice(0, 6).map((tag) => (
-                  <TagFilterChip key={tag} tag={tag} prompt className="chip chip-prompt buttonless" />
-                ))}
-              </div>
-            ) : null}
-          </div>
+          {promptTags.length ? (
+            <div className="chip-row gallery-overlay-tags">
+              {promptTags.slice(0, 3).map((tag) => (
+                <TagFilterChip key={tag} tag={tag} prompt className="chip chip-prompt buttonless" />
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
-      {menuOpen && menuPos && typeof document !== "undefined"
+
+      {/* Mobile: slide-up bottom sheet on long-press */}
+      {isMobile ? (
+        <BottomSheet open={bottomSheetOpen} onClose={() => setBottomSheetOpen(false)} title={title} subtitle={subtitle}>
+          <div className="stack">
+            {menuActions.map((action) => (
+              <button
+                key={action.label}
+                type="button"
+                className={`button small-button ${
+                  action.variant === "subtle"
+                    ? "subtle-button"
+                    : action.variant === "ghost"
+                      ? "ghost-button"
+                      : action.variant === "danger"
+                        ? "danger-button"
+                        : ""
+                }`.trim()}
+                disabled={action.disabled}
+                onClick={() => triggerMenuAction(action)}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        </BottomSheet>
+      ) : null}
+
+      {/* Desktop: portal context menu on right-click */}
+      {!isMobile && menuOpen && menuPos && typeof document !== "undefined"
         ? createPortal(
             <div
               className="gallery-context-menu gallery-context-menu-open"
               style={{
                 position: "fixed",
-                left: Math.min(menuPos.x, window.innerWidth - 240),
+                left: Math.min(menuPos.x, window.innerWidth - 200),
                 top: Math.min(menuPos.y, window.innerHeight - 300),
                 zIndex: 9999,
               }}
             >
-              <div className="stack">
-                <div>
-                  <strong>{title}</strong>
-                  {subtitle ? <p className="subdued">{subtitle}</p> : null}
-                </div>
-                {promptExcerpt ? <p className="subdued">{promptExcerpt}</p> : null}
-              </div>
-              <div className="stack">
-                {menuActions.map((action) => (
-                  <button
-                    key={action.label}
-                    type="button"
-                    className={`button small-button ${
-                      action.variant === "subtle"
-                        ? "subtle-button"
-                        : action.variant === "ghost"
-                          ? "ghost-button"
-                          : action.variant === "danger"
-                            ? "danger-button"
-                            : ""
-                    }`.trim()}
-                    disabled={action.disabled}
-                    onClick={() => triggerMenuAction(action)}
-                  >
-                    {action.label}
-                  </button>
-                ))}
-              </div>
+              {menuActions.map((action) => (
+                <button
+                  key={action.label}
+                  type="button"
+                  className="button context-action-btn"
+                  disabled={action.disabled}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    triggerMenuAction(action);
+                  }}
+                >
+                  {action.label}
+                </button>
+              ))}
             </div>,
             document.body
           )

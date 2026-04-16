@@ -78,22 +78,32 @@ export default function SourcesPage() {
           {sources.map((source) => {
             const activeJob = findActiveJob(source, jobs);
             return (
-              <Link key={source.id} href={`/sources/${source.id}`} className="source-hub-card">
-                <div className="source-hub-card-visual">
-                  <span className="pill">{source.status}</span>
-                </div>
-                <div className="source-hub-card-body">
-                  <div>
-                    <p className="asset-name">{source.name}</p>
-                    <p className="subdued">{source.display_root_path}</p>
+              <div key={source.id} style={{ display: "contents" }}>
+                <Link href={`/sources/${source.id}`} className="source-hub-card">
+                  <div className="source-hub-card-visual">
+                    <span className="pill">{source.status}</span>
                   </div>
-                  {activeJob ? (
-                    <p className="subdued">{activeJob.progress}% · {activeJob.message ?? "Scanning..."}</p>
-                  ) : (
-                    <p className="subdued">Open live gallery</p>
-                  )}
-                </div>
-              </Link>
+                  <div className="source-hub-card-body">
+                    <div>
+                      <p className="asset-name">{source.name}</p>
+                      <p className="subdued">{source.display_root_path}</p>
+                    </div>
+                    {activeJob ? (
+                      <p className="subdued">{activeJob.progress}% · {activeJob.message ?? "Scanning..."}</p>
+                    ) : (
+                      <p className="subdued">Open live gallery</p>
+                    )}
+                  </div>
+                </Link>
+                {/* v1.6 — File Explorer shortcut */}
+                <Link
+                  href={`/sources/${source.id}/explorer`}
+                  className="button ghost-button small-button"
+                  style={{ justifySelf: "start", marginTop: "-0.5rem", marginBottom: "0.5rem" }}
+                >
+                  📁 File Explorer
+                </Link>
+              </div>
             );
           })}
         </div>

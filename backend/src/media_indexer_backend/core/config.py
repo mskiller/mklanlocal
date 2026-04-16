@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     clip_enabled: bool = True
     clip_model_id: str = "openai/clip-vit-base-patch32"
     clip_device: str = "cpu"
+    nsfw_detector_enabled: bool = True
+    nsfw_model_id: str = "Falconsai/nsfw_image_detection"
 
     @property
     def allowed_source_root_paths(self) -> list[Path]:

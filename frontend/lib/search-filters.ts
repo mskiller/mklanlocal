@@ -18,7 +18,9 @@ export const DEFAULT_SEARCH_FILTERS: SearchFilterFormState = {
   min_rating: "",
   review_status: "",
   flagged: false,
-  sort: "relevance",
+  // v1.6: use modified_at as default so the page shows ALL images on open with no query.
+  // "relevance" with an empty query returns 0 results on the backend.
+  sort: "modified_at",
 };
 
 const FILTER_KEYS = Object.keys(DEFAULT_SEARCH_FILTERS) as Array<keyof SearchFilterFormState>;

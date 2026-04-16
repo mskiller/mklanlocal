@@ -5,6 +5,24 @@ import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
 
 import { useAuth } from "@/components/auth-provider";
+import { useSettings } from "@/components/settings-provider";
+
+function BackButton({ className = "" }: { className?: string }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  // Don't show on root/dashboard
+  if (pathname === "/") return null;
+  return (
+    <button
+      type="button"
+      className={`button ghost-button small-button ${className}`.trim()}
+      onClick={() => router.back()}
+      aria-label="Go back"
+    >
+      ← Back
+    </button>
+  );
+}
 
 export function AppShell({
   title,
@@ -20,6 +38,7 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, logout } = useAuth();
+  const { nsfwVisible, setNsfwVisible } = useSettings();
   const [navOpen, setNavOpen] = useState(false);
   const [desktopNavCollapsed, setDesktopNavCollapsed] = useState(false);
 
@@ -111,12 +130,24 @@ export function AppShell({
     </>
   );
 
+  const nsfwAction = (
+    <button
+      type="button"
+      className={`button small-button ${nsfwVisible ? "subtle-button" : "ghost-button"}`}
+      onClick={() => setNsfwVisible(!nsfwVisible)}
+      title={nsfwVisible ? "Hide NSFW content" : "Show NSFW content"}
+    >
+      NSFW: {nsfwVisible ? "ON" : "OFF"}
+    </button>
+  );
+
   return (
     <div className={`shell ${desktopNavCollapsed ? "shell-desktop-nav-collapsed" : ""} ${navOpen ? "shell-nav-open" : ""}`.trim()}>
       <div className="mobile-topbar">
         <button className="button ghost-button small-button mobile-nav-toggle" type="button" onClick={() => setNavOpen((value) => !value)}>
           {navOpen ? "Close" : "Menu"}
         </button>
+        <BackButton className="mobile-back-btn" />
         <div>
           <p className="eyebrow">Media Indexer</p>
           <p className="mobile-topbar-title">{title}</p>
@@ -181,11 +212,15 @@ export function AppShell({
       <main className="content">
         <header className="page-header">
           <div>
-            <p className="eyebrow">{user.username} · {user.role}</p>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.25rem" }}>
+              <BackButton />
+              <p className="eyebrow" style={{ margin: 0 }}>{user.username} · {user.role}</p>
+            </div>
             <h1>{title}</h1>
             {description ? <p className="subdued">{description}</p> : null}
           </div>
           <div className="page-actions">
+            {nsfwAction}
             {actions}
             {accountActions}
           </div>

@@ -311,6 +311,10 @@ function SourceBrowsePageContent() {
           <Link href="/search" className="button subtle-button small-button">
             Open Search
           </Link>
+          {/* v1.6 — File Explorer link */}
+          <Link href={`/sources/${params.id}/explorer`} className="button ghost-button small-button">
+            📁 File Explorer
+          </Link>
           <button className="button ghost-button small-button mobile-control-button" type="button" onClick={() => setControlsOpen(true)}>
             Controls
           </button>

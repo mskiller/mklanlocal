@@ -18,7 +18,7 @@ ENV INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL}
 COPY --from=deps /workspace/frontend/node_modules ./node_modules
 COPY frontend ./
 
-RUN npm run build
+RUN npm run build && mkdir -p /workspace/frontend/public
 
 FROM node:22-bookworm-slim AS runner
 

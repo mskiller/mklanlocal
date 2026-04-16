@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from sse_starlette.sse import EventSourceResponse
 
 from media_indexer_backend.api.dependencies import get_session, require_admin, require_authenticated
+from media_indexer_backend.models.enums import ScanStatus
 from media_indexer_backend.models.tables import User
 from media_indexer_backend.schemas.scan_job import ScanJobErrorEntry, ScanJobRead
 from media_indexer_backend.services.audit import record_audit_event
@@ -13,6 +17,8 @@ from media_indexer_backend.services.scan_service import cancel_scan_job, get_sca
 
 
 router = APIRouter(prefix="/scan-jobs", tags=["scan-jobs"])
+
+TERMINAL_STATUSES = {ScanStatus.COMPLETED, ScanStatus.FAILED, ScanStatus.CANCELLED}
 
 
 @router.get("", response_model=list[ScanJobRead])
@@ -40,6 +46,37 @@ def get_scan_job_errors(
 ) -> list[ScanJobErrorEntry]:
     job = get_scan_job_or_404(session, job_id)
     return [ScanJobErrorEntry.model_validate(item) for item in (job.error_details or [])]
+
+
+@router.get("/{job_id}/stream")
+async def stream_scan_job(
+    job_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_authenticated),
+):
+    """SSE endpoint — emits progress events every 1.5 s while job is active."""
+
+    async def event_generator():
+        while True:
+            # Re-query on each tick so we pick up live updates
+            session.expire_all()
+            job = session.get(type(get_scan_job_or_404(session, job_id)), job_id)
+            if job is None:
+                break
+
+            payload = json.dumps({
+                "status": job.status,
+                "processed": job.scanned_count,
+                "total": job.progress,
+            })
+            yield {"data": payload}
+
+            if job.status in TERMINAL_STATUSES:
+                break
+
+            await asyncio.sleep(1.5)
+
+    return EventSourceResponse(event_generator())
 
 
 @router.post("/{job_id}/cancel", response_model=ScanJobRead)

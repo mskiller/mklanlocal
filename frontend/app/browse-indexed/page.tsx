@@ -12,24 +12,33 @@ import { GalleryTile } from "@/components/gallery-tile";
 import { ImageExplorerOverlay } from "@/components/image-explorer-overlay";
 import { JustifiedGallery } from "@/components/justified-gallery";
 import { useAuth } from "@/components/auth-provider";
+import { useSettings } from "@/components/settings-provider";
 import {
   addAssetsToCollection,
+  bulkAnnotateAssets,
+  downloadWorkflow,
   fetchAssetBrowse,
   fetchCollections,
+  fetchScanJobs,
   fetchSources,
+  fetchTags,
   mediaUrl,
 } from "@/lib/api";
 import { formatBytes, formatDate } from "@/lib/asset-metadata";
 import { sourceFolderBrowseHref } from "@/lib/browse-links";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { AssetBrowseItem, CollectionSummary, Source } from "@/lib/types";
+import { AssetBrowseItem, CollectionSummary, Source, TagCount } from "@/lib/types";
 
 type BrowseSortMode = "modified_at" | "created_at" | "filename";
 type BrowseDisplayMode = "gallery" | "explorer";
+type FilterScope = "only_indexed" | "has_workflow" | "has_prompt" | null;
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 
 export default function BrowseIndexedPage() {
   const router = useRouter();
   const { user } = useAuth();
+  const { nsfwVisible } = useSettings();
   const [sources, setSources] = useState<Source[]>([]);
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
   const [items, setItems] = useState<AssetBrowseItem[]>([]);
@@ -43,7 +52,7 @@ export default function BrowseIndexedPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedAssets, setSelectedAssets] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedAssets, setSelectedAssets] = useState<Array<{ id: string; name: string; previewUrl?: string | null }>>([]);
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkSelectedIds, setBulkSelectedIds] = useState<string[]>([]);
   const [explorerIndex, setExplorerIndex] = useState<number | null>(null);
@@ -52,15 +61,30 @@ export default function BrowseIndexedPage() {
   const [pendingCollectionAssetIds, setPendingCollectionAssetIds] = useState<string[]>([]);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
+  // M2 — SSE scan progress
+  const [scanProgress, setScanProgress] = useState<{ processed: number; total: number } | null>(null);
+  const [activeScanJobId, setActiveScanJobId] = useState<string | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  // M5.5 — Tag frequency panel
+  const [topTags, setTopTags] = useState<TagCount[]>([]);
+  const [tagsOpen, setTagsOpen] = useState(true);
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
+
+  // M5.7 — Filter scopes
+  const [filterScope, setFilterScope] = useState<FilterScope>(null);
+
   useEffect(() => {
     const loadStatic = async () => {
       try {
-        const [nextSources, nextCollections] = await Promise.all([
+        const [nextSources, nextCollections, nextTags] = await Promise.all([
           fetchSources(),
           user?.capabilities.can_manage_collections ? fetchCollections() : Promise.resolve([]),
+          fetchTags(),
         ]);
         setSources(nextSources);
         setCollections(nextCollections);
+        setTopTags(nextTags.slice(0, 20));
       } catch {
         setSources([]);
         setCollections([]);
@@ -69,25 +93,85 @@ export default function BrowseIndexedPage() {
     void loadStatic();
   }, [user?.capabilities.can_manage_collections]);
 
+  // M2 — Detect active scan jobs on mount / sourceId change
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      setPage(1);
-      setSelectedAssets([]);
+    const detectScan = async () => {
       try {
-        const response = await fetchAssetBrowse({ source_id: sourceId || undefined, sort: sortMode, page: 1, page_size: 36 });
-        setItems(response.items);
-        setTotal(response.total);
-        setHasMore(response.page * response.page_size < response.total);
-      } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "Unable to load indexed browse.");
-      } finally {
-        setLoading(false);
+        const jobs = await fetchScanJobs();
+        const active = jobs.find(
+          (j) =>
+            (j.status === "queued" || j.status === "running") &&
+            (sourceId ? j.source_id === sourceId : true)
+        );
+        setActiveScanJobId(active?.id ?? null);
+      } catch {
+        setActiveScanJobId(null);
       }
     };
+    void detectScan();
+  }, [sourceId]);
+
+  // M2 — Open SSE stream when activeScanJobId is set
+  useEffect(() => {
+    if (!activeScanJobId) {
+      setScanProgress(null);
+      return;
+    }
+    // Close any existing stream
+    eventSourceRef.current?.close();
+    const es = new EventSource(`${API_BASE_URL}/scan-jobs/${activeScanJobId}/stream`, { withCredentials: true });
+    eventSourceRef.current = es;
+
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as { status: string; processed: number; total: number };
+        setScanProgress({ processed: data.processed, total: data.total });
+        if (data.status === "completed" || data.status === "failed" || data.status === "cancelled") {
+          es.close();
+          setActiveScanJobId(null);
+          setScanProgress(null);
+          // Reload gallery
+          setPage(1);
+        }
+      } catch {
+        // ignore parse errors
+      }
+    };
+    es.onerror = () => {
+      es.close();
+      setActiveScanJobId(null);
+      setScanProgress(null);
+    };
+
+    return () => es.close();
+  }, [activeScanJobId]);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    setPage(1);
+    setSelectedAssets([]);
+    try {
+      const response = await fetchAssetBrowse({
+        source_id: sourceId || undefined,
+        sort: sortMode,
+        page: 1,
+        page_size: 36,
+        exclude_tags: !nsfwVisible ? "nsfw" : undefined,
+      });
+      setItems(response.items);
+      setTotal(response.total);
+      setHasMore(response.page * response.page_size < response.total);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Unable to load indexed browse.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     void load();
-  }, [sourceId, sortMode]);
+  }, [sourceId, sortMode, nsfwVisible]);
 
   useEffect(() => {
     if (page === 1) {
@@ -96,7 +180,13 @@ export default function BrowseIndexedPage() {
     const loadMore = async () => {
       setLoadingMore(true);
       try {
-        const response = await fetchAssetBrowse({ source_id: sourceId || undefined, sort: sortMode, page, page_size: 36 });
+        const response = await fetchAssetBrowse({
+          source_id: sourceId || undefined,
+          sort: sortMode,
+          page,
+          page_size: 36,
+          exclude_tags: !nsfwVisible ? "nsfw" : undefined,
+        });
         setItems((current) => [...current, ...response.items]);
         setTotal(response.total);
         setHasMore(response.page * response.page_size < response.total);
@@ -126,13 +216,27 @@ export default function BrowseIndexedPage() {
     return () => observer.disconnect();
   }, [hasMore, loading, loadingMore, items.length]);
 
-  const toggleSelection = (assetId: string, name: string) => {
+  // M5.5 — Apply tag filter + scope filter client-side
+  const displayItems = useMemo(() => {
+    let filtered = items;
+    if (tagFilter) {
+      filtered = filtered.filter((item) => item.prompt_tags.includes(tagFilter));
+    }
+    if (filterScope === "has_workflow") {
+      filtered = filtered.filter((item) => item.workflow_export_available);
+    } else if (filterScope === "has_prompt") {
+      filtered = filtered.filter((item) => Boolean(item.prompt_excerpt));
+    }
+    return filtered;
+  }, [items, tagFilter, filterScope]);
+
+  const toggleSelection = (assetId: string, name: string, previewUrl?: string | null) => {
     setSelectedAssets((current) => {
       const exists = current.some((item) => item.id === assetId);
       if (exists) {
         return current.filter((item) => item.id !== assetId);
       }
-      const next = { id: assetId, name };
+      const next = { id: assetId, name, previewUrl };
       if (current.length === 2) {
         return [current[1], next];
       }
@@ -140,10 +244,15 @@ export default function BrowseIndexedPage() {
     });
   };
 
+  const removeSelection = (id: string) => {
+    setSelectedAssets((current) => current.filter((item) => item.id !== id));
+  };
+
   const compareHref = selectedAssets.length === 2 ? `/compare?a=${selectedAssets[0].id}&b=${selectedAssets[1].id}` : null;
+
   const explorerItems = useMemo(
     () =>
-      items.map((item) => ({
+      displayItems.map((item) => ({
         key: item.id,
         title: item.filename,
         subtitle: [item.source_name, item.generator].filter(Boolean).join(" · ") || undefined,
@@ -155,23 +264,31 @@ export default function BrowseIndexedPage() {
         detailHref: `/assets/${item.id}`,
         similarHref: `/assets/${item.id}/similar`,
         sourceContext: item.relative_path,
+        workflowAvailable: item.workflow_export_available,
         metadataSummary: [
           ...(item.width && item.height ? [{ label: "Dimensions", value: `${item.width} x ${item.height}` }] : []),
           { label: "Modified", value: formatDate(item.modified_at) },
           { label: "Size", value: formatBytes(item.size_bytes) },
         ],
       })),
-    [items]
+    [displayItems]
   );
 
+  // Auto-select first item when entering Explorer mode
+  const prevDisplayModeRef = useRef<BrowseDisplayMode>(displayMode);
   useEffect(() => {
-    if (displayMode === "explorer" && items.length && explorerIndex === null) {
+    const prev = prevDisplayModeRef.current;
+    prevDisplayModeRef.current = displayMode;
+    if (displayMode === "explorer" && displayItems.length && explorerIndex === null) {
       setExplorerIndex(0);
     }
-    if (displayMode === "gallery" && explorerIndex !== null) {
+    // Only clear the overlay when the user explicitly switches FROM explorer BACK TO gallery,
+    // not on every explorerIndex change (which caused clicks to open+close in the same cycle).
+    if (prev === "explorer" && displayMode === "gallery") {
       setExplorerIndex(null);
     }
-  }, [displayMode, explorerIndex, items.length]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayMode, displayItems.length]); // intentionally excludes explorerIndex
 
   useEffect(() => {
     if (explorerIndex === null) {
@@ -231,7 +348,7 @@ export default function BrowseIndexedPage() {
         }}
         onActiveIndexChange={(next) => setExplorerIndex(next)}
         renderActions={(item) => {
-          const sourceItem = items.find((entry) => entry.id === item.key);
+          const sourceItem = displayItems.find((entry) => entry.id === item.key);
           if (!sourceItem) {
             return null;
           }
@@ -240,7 +357,7 @@ export default function BrowseIndexedPage() {
           return (
             <>
               <div className="card-actions">
-                <button type="button" className="button small-button" onClick={() => toggleSelection(sourceItem.id, sourceItem.filename)}>
+                <button type="button" className="button small-button" onClick={() => toggleSelection(sourceItem.id, sourceItem.filename, mediaUrl(sourceItem.preview_url))}>
                   {selected ? "Deselect for Compare" : "Stage for Compare"}
                 </button>
                 {compareTarget ? (
@@ -279,6 +396,21 @@ export default function BrowseIndexedPage() {
                   Copy Danbooru Tags
                 </button>
               </div>
+              {/* M4 — Generation Tools group */}
+              {sourceItem.workflow_export_available ? (
+                <div>
+                  <p className="eyebrow" style={{ marginBottom: "0.4rem" }}>Generation Tools</p>
+                  <div className="card-actions">
+                    <button
+                      type="button"
+                      className="button ghost-button small-button"
+                      onClick={() => void downloadWorkflow(sourceItem.id, sourceItem.filename)}
+                    >
+                      Download Workflow JSON
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div className="card-actions">
                 <button
                   type="button"
@@ -295,12 +427,24 @@ export default function BrowseIndexedPage() {
           );
         }}
       />
+      {bulkMode && bulkSelectedIds.length > 0 && (
+        <BulkActionBar
+          selectedIds={bulkSelectedIds}
+          onClear={() => setBulkSelectedIds([])}
+          onDone={() => {
+            setBulkSelectedIds([]);
+            setBulkMode(false);
+            void load();
+          }}
+        />
+      )}
       <CompareSelectionTray
         selectionMode={selectionMode}
-        selectedCount={selectedAssets.length}
+        selectedItems={selectedAssets.map((a) => ({ id: a.id, name: a.name, previewUrl: a.previewUrl }))}
         compareHref={compareHref}
         onToggleSelectionMode={() => setSelectionMode((value) => !value)}
         onClearSelection={() => setSelectedAssets([])}
+        onRemoveItem={removeSelection}
         hint="This page is for visual browsing only. Hover or long-press for prompt tags, quick actions, and collection shortcuts."
         canAddToCollection={Boolean(user?.capabilities.can_manage_collections)}
         onAddToCollection={
@@ -312,13 +456,6 @@ export default function BrowseIndexedPage() {
             : undefined
         }
       />
-      {bulkMode && bulkSelectedIds.length > 0 && (
-        <BulkActionBar
-          selectedIds={bulkSelectedIds}
-          onClear={() => setBulkSelectedIds([])}
-          onDone={() => { setBulkSelectedIds([]); setBulkMode(false); }}
-        />
-      )}
       {!selectionMode && (
         <div style={{ padding: "0.5rem 1rem" }}>
           <button
@@ -357,7 +494,7 @@ export default function BrowseIndexedPage() {
                 className={`button small-button ${displayMode === "explorer" ? "" : "ghost-button"}`}
                 type="button"
                 onClick={() => setDisplayMode("explorer")}
-                disabled={!items.length}
+                disabled={!displayItems.length}
               >
                 Explorer
               </button>
@@ -377,17 +514,97 @@ export default function BrowseIndexedPage() {
               </button>
             </div>
           </div>
+
+          {/* M5.7 — Filter scopes */}
+          <div className="browse-toolbar-group">
+            <span className="subdued">Quick filters</span>
+            <div className="filter-scope-group">
+              {([
+                ["has_workflow", "Has workflow"],
+                ["has_prompt", "Has prompt"],
+              ] as const).map(([scope, label]) => (
+                <button
+                  key={scope}
+                  type="button"
+                  className={`button small-button ${filterScope === scope ? "" : "ghost-button"}`}
+                  onClick={() => setFilterScope(filterScope === scope ? null : scope)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* M2 — Scan progress bar */}
+          {scanProgress ? (
+            <div className="scan-progress">
+              <span>Scanning… {scanProgress.processed} / {scanProgress.total || "?"}</span>
+              <div className="scan-progress-bar">
+                <div
+                  className="scan-progress-bar-inner"
+                  style={{
+                    width: scanProgress.total
+                      ? `${Math.min(100, (scanProgress.processed / scanProgress.total) * 100).toFixed(1)}%`
+                      : "0%",
+                  }}
+                />
+              </div>
+            </div>
+          ) : null}
+
           <div className="chip-row">
             <span className="chip">{total} indexed images</span>
             {sourceId ? <span className="chip">Filtered source</span> : null}
+            {tagFilter ? (
+              <button
+                type="button"
+                className="chip"
+                style={{ cursor: "pointer" }}
+                onClick={() => setTagFilter(null)}
+              >
+                #{tagFilter} ✕
+              </button>
+            ) : null}
           </div>
+
+          {/* M5.5 — Top tags panel */}
+          {topTags.length > 0 ? (
+            <div className="tag-frequency-panel">
+              <button type="button" className="browse-collapsible" onClick={() => setTagsOpen((v) => !v)}>
+                <span>Top tags</span>
+                <span>{tagsOpen ? "▲" : "▼"}</span>
+              </button>
+              {tagsOpen ? (
+                <div className="tag-frequency-chips">
+                  {topTags.map((tc) => {
+                    const minSize = 0.75;
+                    const maxSize = 1.15;
+                    const maxCount = topTags[0]?.count ?? 1;
+                    const size = minSize + ((tc.count / maxCount) * (maxSize - minSize));
+                    return (
+                      <button
+                        key={tc.tag}
+                        type="button"
+                        className={`tag-freq-chip ${tagFilter === tc.tag ? "tag-freq-chip-active" : ""}`}
+                        style={{ fontSize: `${size.toFixed(2)}rem` }}
+                        onClick={() => setTagFilter(tagFilter === tc.tag ? null : tc.tag)}
+                        title={`${tc.count} images`}
+                      >
+                        {tc.tag}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </aside>
         <section className="stack">
           {error ? <section className="panel empty-state">{error}</section> : null}
           {loading ? <section className="panel empty-state">Loading indexed gallery…</section> : null}
           <JustifiedGallery
             className="gallery-surface"
-            items={items.map((item, index) => {
+            items={displayItems.map((item, index) => {
               const selected = selectedAssets.some((entry) => entry.id === item.id);
               const compareTarget = selectedAssets.find((entry) => entry.id !== item.id);
               return {
@@ -400,23 +617,49 @@ export default function BrowseIndexedPage() {
                     tileStyle={{ height: "100%" }}
                     imageButtonStyle={{ height: "100%", aspectRatio: "auto" }}
                     imageSrc={mediaUrl(item.preview_url)}
+                    blurHash={item.blur_hash}
                     alt={item.filename}
                     title={item.filename}
                     subtitle={[item.source_name, item.generator].filter(Boolean).join(" · ") || undefined}
                     promptExcerpt={item.prompt_excerpt}
                     promptTags={item.prompt_tags}
                     selected={selected}
-                    selectionMode={selectionMode}
+                    selectionMode={bulkMode || selectedAssets.length > 0}
+                    workflowAvailable={item.workflow_export_available}
                     onOpen={() => setExplorerIndex(index)}
-                    onToggleSelect={() => toggleSelection(item.id, item.filename)}
+                    onToggleSelect={() => {
+                      if (bulkMode) {
+                        setBulkSelectedIds((ids) => ids.includes(item.id) ? ids.filter((x) => x !== item.id) : [...ids, item.id]);
+                      } else {
+                        toggleSelection(item.id, item.filename, mediaUrl(item.preview_url));
+                      }
+                    }}
                     menuActions={[
                       { label: "Open Explorer", onSelect: () => setExplorerIndex(index) },
                       { label: "Open Detail", onSelect: () => router.push(`/assets/${item.id}`), variant: "subtle" },
                       { label: "Open Similar", onSelect: () => router.push(`/assets/${item.id}/similar`), variant: "subtle" },
-                      { label: selected ? "Deselect for Compare" : "Select for Compare", onSelect: () => toggleSelection(item.id, item.filename), variant: "ghost" },
-                      ...(bulkMode
-                        ? [{ label: bulkSelectedIds.includes(item.id) ? "Remove from Bulk" : "Add to Bulk", onSelect: () => setBulkSelectedIds((ids) => ids.includes(item.id) ? ids.filter((x) => x !== item.id) : [...ids, item.id]), variant: "ghost" as const }]
+                      ...(item.workflow_export_available
+                        ? [
+                            {
+                              label: "Download Workflow JSON",
+                              onSelect: () => void downloadWorkflow(item.id, item.filename),
+                              variant: "ghost" as const,
+                            },
+                          ]
                         : []),
+                      { 
+                        label: bulkMode 
+                          ? (bulkSelectedIds.includes(item.id) ? "Remove from Bulk" : "Add to Bulk")
+                          : (selected ? "Deselect" : "Select"), 
+                        onSelect: () => {
+                          if (bulkMode) {
+                            setBulkSelectedIds((ids) => ids.includes(item.id) ? ids.filter((x) => x !== item.id) : [...ids, item.id]);
+                          } else {
+                            toggleSelection(item.id, item.filename, mediaUrl(item.preview_url));
+                          }
+                        }, 
+                        variant: "ghost" 
+                      },
                       ...(compareTarget
                         ? [{ label: "Compare with Selected", onSelect: () => router.push(`/compare?a=${compareTarget.id}&b=${item.id}`), variant: "subtle" as const }]
                         : []),
@@ -432,6 +675,30 @@ export default function BrowseIndexedPage() {
                         },
                         variant: "ghost",
                         disabled: !item.prompt_tag_string,
+                      },
+                      ...(item.workflow_export_available
+                        ? [{
+                            label: "Download Workflow JSON",
+                            onSelect: () => void downloadWorkflow(item.id, item.filename),
+                            variant: "ghost" as const,
+                          }]
+                        : []),
+                      {
+                        label: "🏷️ Add Tag...",
+                        onSelect: () => {
+                          const tag = window.prompt("Enter tag name to add:");
+                          if (tag && tag.trim()) {
+                            void bulkAnnotateAssets({ asset_ids: [item.id], tags: [tag.trim()] }).then(() => void load());
+                          }
+                        },
+                        variant: "ghost",
+                      },
+                      {
+                        label: "🔞 Tag NSFW",
+                        onSelect: () => {
+                          void bulkAnnotateAssets({ asset_ids: [item.id], tags: ["nsfw"] }).then(() => void load());
+                        },
+                        variant: "ghost",
                       },
                       {
                         label: "Open Live Folder",
@@ -452,7 +719,7 @@ export default function BrowseIndexedPage() {
           {!loading ? (
             <section className="panel stack">
               <div className="row-between">
-                <p className="subdued">Showing {items.length} of {total} indexed images</p>
+                <p className="subdued">Showing {displayItems.length} of {total} indexed images</p>
                 {loadingMore ? <p className="subdued">Loading more…</p> : null}
               </div>
               <div ref={sentinelRef} className="infinite-sentinel" />

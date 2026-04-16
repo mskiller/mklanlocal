@@ -6,11 +6,13 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { AssetCard } from "@/components/asset-card";
 import { useAuth } from "@/components/auth-provider";
+import { useSettings } from "@/components/settings-provider";
 import { fetchAssets, fetchScanJobs, fetchSources } from "@/lib/api";
 import { AssetSummary, ScanJob, Source } from "@/lib/types";
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const { nsfwVisible } = useSettings();
   const [sources, setSources] = useState<Source[]>([]);
   const [jobs, setJobs] = useState<ScanJob[]>([]);
   const [recentAssets, setRecentAssets] = useState<AssetSummary[]>([]);
@@ -21,7 +23,11 @@ export default function DashboardPage() {
       const [nextSources, nextJobs, nextAssets] = await Promise.all([
         fetchSources(),
         fetchScanJobs(),
-        fetchAssets({ sort: "modified_at", page_size: 6 }),
+        fetchAssets({
+          sort: "modified_at",
+          page_size: 6,
+          exclude_tags: !nsfwVisible ? "nsfw" : undefined,
+        }),
       ]);
       setSources(nextSources);
       setJobs(nextJobs);
@@ -33,7 +39,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [nsfwVisible]);
 
   const runningJobs = jobs.filter((job) => job.status === "running" || job.status === "queued").length;
 

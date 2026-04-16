@@ -1,0 +1,788 @@
+# MKLanLocal v1.8 — Development Plan
+
+**Author:** Claude code review + planning pass  
+**Target branch:** `feature/v1.8`  
+**Base tag:** `v1.7.0`
+
+---
+
+## Executive Summary
+
+v1.8 focuses on three tracks:
+
+1. **Workflow extraction from image files** — native PNG chunk reading (including stealth PNG), so workflow data survives re-saves and supports formats exiftool misses.
+2. **Download workflow everywhere** — right-click context menu in every gallery view, plus a dedicated button on the image detail page for non-ComfyUI generators.
+3. **UI quality pass** — fix the `window.location.reload()` anti-pattern, thread `workflow_export_available` into `AssetSummary` so search results get the same affordances as the browse page, add a workflow badge on tiles, and propose two new tools (Batch Metadata Export, GPS Mini-map).
+
+---
+
+## Part 1 — Code Issues Found in v1.7 (Fix First)
+
+### 1.1 `window.location.reload()` in AssetCard
+
+**File:** `frontend/components/asset-card.tsx`, `handleTagAction` function.
+
+```ts
+window.location.reload(); // Simple refresh to show new tags/hide if needed
+```
+
+This is a full page reload on every tag action — kills scroll position and compare state. Replace with a callback prop.
+
+**Fix:**
+
+```tsx
+// Add optional callback prop
+export function AssetCard({
+  ...
+  onTagged?: (assetId: string) => void;
+}) {
+  const handleTagAction = async (tag: string) => {
+    setMenuPos(null);
+    try {
+      await bulkAnnotateAssets({ asset_ids: [asset.id], tags: [tag] });
+      onTagged?.(asset.id);   // caller refreshes its own state
+    } catch (e) {
+      console.error("Tagging failed", e);
+    }
+  };
+```
+
+Callers that currently pass no `onTagged` will simply do nothing (safe default). The asset detail page and browse pages should pass `onTagged` to trigger a local data refresh.
+
+---
+
+### 1.2 `workflow_export_available` missing from `AssetSummary`
+
+**Files:**
+- `backend/src/media_indexer_backend/schemas/asset.py`
+- `backend/src/media_indexer_backend/services/asset_service.py`
+- `frontend/lib/types.ts`
+
+`AssetBrowseItem` already exposes `workflow_export_available`. But `AssetSummary` (returned by `/assets` and `/search`) does not. This means:
+
+- The **search page** (uses `AssetCard` with `AssetSummary`) cannot show a download button.
+- The **similar assets panel** on the detail page cannot show it either.
+
+**Fix — backend `schemas/asset.py`:**
+
+```python
+class AssetSummary(BaseModel):
+    ...
+    workflow_export_available: bool = False   # ← ADD THIS
+```
+
+**Fix — backend `services/asset_service.py`** in `_asset_summary()`:
+
+```python
+# Already computes workflow_available for AssetBrowseItem. Reuse it here.
+return AssetSummary(
+    ...
+    workflow_export_available=workflow_available,
+)
+```
+
+`workflow_available` is already computed just above this return block for the browse path — extract it into a shared helper so both `_asset_summary` (for `AssetSummary`) and `_browse_item` (for `AssetBrowseItem`) call the same logic.
+
+**Fix — frontend `lib/types.ts`:**
+
+```ts
+export interface AssetSummary {
+  ...
+  workflow_export_available: boolean;
+}
+```
+
+---
+
+### 1.3 Asset detail page `positivePrompt` renders "No positive prompt extracted." for all non-ComfyUI assets
+
+**File:** `frontend/app/assets/[id]/page.tsx`
+
+```tsx
+<pre className="prompt-block">{positivePrompt ?? "No positive prompt extracted."}</pre>
+```
+
+For A1111 images `workflow_text` contains the full parameters block and there is no separate `prompt` field. The "no prompt" message is misleading. Guard the whole Prompt Extraction panel:
+
+```tsx
+{(positivePrompt || negativePrompt || workflowText) ? (
+  <article className="panel stack">
+    ...prompt panels...
+  </article>
+) : null}
+```
+
+---
+
+### 1.4 Search page has no workflow download affordance
+
+**File:** `frontend/app/search/page.tsx`
+
+The search page renders `AssetCard` components but never passes `onDownloadWorkflow`. Once issue 1.2 is fixed and `AssetSummary` carries `workflow_export_available`, the search page should pass a download handler:
+
+```tsx
+<AssetCard
+  key={asset.id}
+  asset={asset}
+  ...
+  onDownloadWorkflow={
+    asset.workflow_export_available
+      ? () => void downloadWorkflow(asset.id, asset.filename)
+      : undefined
+  }
+/>
+```
+
+And `AssetCard` should render this in its context menu alongside the existing tag actions.
+
+---
+
+## Part 2 — New Feature: Workflow Extraction from Image Files
+
+### 2.1 Background
+
+Currently `workflow_export.py` builds the JSON payload entirely from metadata already stored in the database (extracted by exiftool at scan time). This means:
+
+- Images re-saved or converted **after** they were originally generated lose the workflow because exiftool no longer sees the PNG text chunks.
+- **Stealth PNG** — a technique where some ComfyUI custom nodes encode the workflow in the **LSBs of the alpha channel pixels** using bit-plane encoding — is completely invisible to exiftool.
+- JPEG images generated by A1111 store parameters in `EXIF:UserComment`. exiftool handles this, but only at scan time.
+
+v1.8 adds a **direct file reader** that runs in the worker at scan time (in addition to exiftool) and can be re-triggered on demand.
+
+---
+
+### 2.2 Worker — New `extract_png_metadata_chunks()` in `extractors.py`
+
+**File:** `worker/src/media_indexer_worker/services/extractors.py`
+
+Add a second extractor that runs Pillow to read raw PNG text chunks. This supplements exiftool and is the only way to read stealth PNG.
+
+```python
+import struct
+import zlib
+from pathlib import Path
+import json
+
+def extract_png_metadata_chunks(path: Path) -> dict:
+    """
+    Read PNG tEXt / iTXt chunks and decode stealth_pngcomp alpha-channel data.
+    Returns a flat dict of key → value strings, same shape as exiftool output.
+    Silently returns {} for non-PNG files or read errors.
+    """
+    result: dict = {}
+    
+    # ── 1. Standard tEXt / iTXt chunks ────────────────────────────────────
+    try:
+        from PIL import Image
+        img = Image.open(path)
+        for key, value in img.info.items():
+            if isinstance(value, (str, bytes)):
+                result[key] = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+    except Exception:
+        pass
+
+    # ── 2. Stealth PNG (alpha-channel LSB encoding) ────────────────────────
+    # Reference: https://github.com/ashen-sensored/stable-diffusion-webui-two-shot
+    # The workflow is encoded as: 
+    #   magic_header (32 bits, LSB of first 32 alpha pixels)
+    #   length field (32 bits)
+    #   gzip-compressed JSON payload
+    try:
+        from PIL import Image
+        import numpy as np
+        img = Image.open(path).convert("RGBA")
+        alpha = np.array(img)[:, :, 3].flatten()
+        
+        # Read magic (first 32 alpha pixels, bit 0)
+        magic_bits = alpha[:32] & 1
+        magic_val = int("".join(str(b) for b in magic_bits), 2)
+        
+        # Two known magic values: uncompressed and gzip-compressed
+        MAGIC_UNCOMPRESSED = 0x53746c73  # "Stls"
+        MAGIC_COMPRESSED   = 0x53746c63  # "Stlc"
+        
+        if magic_val in (MAGIC_UNCOMPRESSED, MAGIC_COMPRESSED):
+            # Read 32-bit length
+            len_bits = alpha[32:64] & 1
+            payload_len = int("".join(str(b) for b in len_bits), 2)
+            
+            # Read payload bits
+            bit_stream = alpha[64:64 + payload_len] & 1
+            byte_count = payload_len // 8
+            raw_bytes = bytes(
+                int("".join(str(b) for b in bit_stream[i*8:(i+1)*8]), 2)
+                for i in range(byte_count)
+            )
+            
+            if magic_val == MAGIC_COMPRESSED:
+                raw_bytes = zlib.decompress(raw_bytes)
+            
+            payload = json.loads(raw_bytes.decode("utf-8"))
+            if isinstance(payload, dict):
+                # Stealth payload typically has "workflow" and/or "prompt" keys
+                for k, v in payload.items():
+                    result.setdefault(k.capitalize(), json.dumps(v) if not isinstance(v, str) else v)
+    except Exception:
+        pass
+    
+    return result
+```
+
+> **Note for coder:** The numpy approach above is the readable reference. For production, prefer a pure-Python bit-reading loop (no numpy in the worker image currently) or add `numpy` to `worker/pyproject.toml` dependencies.
+
+---
+
+### 2.3 Worker — Integrate into Scanner
+
+**File:** `worker/src/media_indexer_worker/services/scanner.py`
+
+After the exiftool call, merge the PNG chunk data:
+
+```python
+exif = extract_exiftool(path)
+
+# v1.8: supplement exiftool with direct PNG chunk reading
+if path.suffix.lower() == ".png":
+    png_chunks = extract_png_metadata_chunks(path)
+    # Only fill gaps — exiftool data takes precedence
+    for key, value in png_chunks.items():
+        exif.setdefault(key, value)
+```
+
+Import the new function at the top of scanner.py:
+
+```python
+from media_indexer_worker.services.extractors import extract_exiftool, extract_ffprobe, extract_png_metadata_chunks
+```
+
+---
+
+### 2.4 Worker — Dependency
+
+**File:** `worker/pyproject.toml`
+
+Add if not already present:
+
+```toml
+[project.dependencies]
+...
+numpy = ">=1.24"   # for stealth PNG alpha-channel decoding
+```
+
+---
+
+### 2.5 Backend — New Endpoint: Extract Workflow from File
+
+**File:** `backend/src/media_indexer_backend/api/routes/assets.py`
+
+Add a new route that re-reads the file from disk and returns the extracted workflow, without requiring a full rescan. This is useful when the user knows a file has a workflow but the DB metadata predates the new extractor.
+
+```python
+@router.get("/assets/{asset_id}/workflow/extract-from-file")
+def extract_asset_workflow_from_file(
+    asset_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_authenticated),
+) -> Response:
+    """
+    Re-reads the asset file directly and extracts embedded workflow/prompt data.
+    Unlike /workflow/download (which reads from DB), this always goes to the file.
+    Returns 404 if no workflow is found in the file.
+    """
+    asset = get_asset_or_404(session, asset_id, current_user=current_user)
+    original_path = resolve_asset_path(asset.source.root_path, asset.relative_path)
+    
+    # Re-run extraction on the live file
+    from media_indexer_backend.services.extractors import extract_png_metadata_from_file
+    raw = extract_png_metadata_from_file(original_path)
+    normalized = normalize_metadata(media_type=..., exif=raw, ffprobe={})
+    
+    payload = build_comfyui_workflow_export(
+        asset_id=str(asset.id),
+        filename=asset.filename,
+        normalized_metadata=normalized,
+        raw_metadata=raw,
+    )
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No exportable workflow found in this file.",
+        )
+    
+    filename = f"{asset.filename.rsplit('.', 1)[0]}-workflow.json"
+    return Response(
+        content=json.dumps(payload, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+```
+
+> **Note:** The `extract_png_metadata_from_file` helper should be a backend-side copy of the worker extractor (or share a common library package). For v1.8 the simplest approach is to duplicate the function in `backend/src/media_indexer_backend/services/extractors.py` (a new file). Refactoring into a shared `libs/` package is a v1.9 task.
+
+---
+
+### 2.6 Backend — Extend `workflow_export.py` for A1111
+
+**File:** `backend/src/media_indexer_backend/services/workflow_export.py`
+
+Currently only handles `generator == "comfyui"`. Add A1111 support so users can download the parameters block as a JSON file.
+
+```python
+def build_a1111_workflow_export(
+    *,
+    asset_id: str,
+    filename: str,
+    normalized_metadata: dict[str, Any],
+    raw_metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    if normalized_metadata.get("generator") != "automatic1111":
+        return None
+    workflow_text = normalized_metadata.get("workflow_text")
+    if not workflow_text:
+        return None
+    return {
+        "asset_id": asset_id,
+        "filename": filename,
+        "generator": "automatic1111",
+        "exported_at": datetime.now(tz=timezone.utc).isoformat(),
+        "parameters": workflow_text,
+    }
+
+
+def build_workflow_export(
+    *,
+    asset_id: str,
+    filename: str,
+    normalized_metadata: dict[str, Any],
+    raw_metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Tries all known generators in priority order."""
+    return (
+        build_comfyui_workflow_export(
+            asset_id=asset_id, filename=filename,
+            normalized_metadata=normalized_metadata, raw_metadata=raw_metadata,
+        )
+        or build_a1111_workflow_export(
+            asset_id=asset_id, filename=filename,
+            normalized_metadata=normalized_metadata, raw_metadata=raw_metadata,
+        )
+    )
+```
+
+Update all callers of `build_comfyui_workflow_export` to call `build_workflow_export` instead.
+
+---
+
+## Part 3 — Workflow Download: Right-click & Image Detail
+
+### 3.1 `AssetCard` — Add Download to Context Menu
+
+**File:** `frontend/components/asset-card.tsx`
+
+```tsx
+export function AssetCard({
+  asset,
+  ...
+  onDownloadWorkflow,   // ← new optional prop
+}: {
+  ...
+  onDownloadWorkflow?: () => void;
+}) {
+  ...
+  // Inside the context menu portal:
+  {onDownloadWorkflow && (
+    <button
+      className="button context-action-btn"
+      onClick={() => { setMenuPos(null); onDownloadWorkflow(); }}
+    >
+      ⬇ Download Workflow JSON
+    </button>
+  )}
+```
+
+---
+
+### 3.2 `GalleryTile` — Workflow badge
+
+**File:** `frontend/components/gallery-tile.tsx`
+
+Add an optional `workflowAvailable` prop. When true, render a small `⚡` badge overlaid in the bottom-right corner of the image thumbnail, consistent with the existing `statusBadge` in the top-left.
+
+```tsx
+export function GalleryTile({
+  ...
+  workflowAvailable?: boolean;
+}) {
+  ...
+  // Inside the image area, after statusBadge:
+  {workflowAvailable && (
+    <span
+      className="gallery-workflow-badge"
+      title="ComfyUI / A1111 workflow embedded"
+      aria-label="Workflow available"
+    >
+      ⚡
+    </span>
+  )}
+```
+
+CSS in `globals.css`:
+
+```css
+.gallery-workflow-badge {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #ffd700;
+  font-size: 0.7rem;
+  padding: 2px 5px;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 2;
+  letter-spacing: 0;
+}
+```
+
+---
+
+### 3.3 Wire badge + download into Browse page
+
+**File:** `frontend/app/browse-indexed/page.tsx`
+
+The browse page already passes `workflowAvailable` to `ImageExplorerOverlay` (line ~267). It also already has a "Download Workflow JSON" menu action in the `GalleryTile` `menuActions` array. The missing piece is the `workflowAvailable` prop on `GalleryTile` itself:
+
+```tsx
+<GalleryTile
+  ...
+  workflowAvailable={item.workflow_export_available}   // ← ADD
+  menuActions={[
+    ...
+    ...(item.workflow_export_available ? [{
+      label: "Download Workflow JSON",
+      onSelect: () => void downloadWorkflow(item.id, item.filename),
+    }] : []),
+  ]}
+/>
+```
+
+---
+
+### 3.4 Wire download into Search page
+
+**File:** `frontend/app/search/page.tsx`
+
+Search uses `AssetCard`. After fix 1.2 (adding `workflow_export_available` to `AssetSummary`):
+
+```tsx
+import { downloadWorkflow, fetchSearch, ... } from "@/lib/api";
+
+...
+
+<AssetCard
+  key={asset.id}
+  asset={asset}
+  ...
+  onDownloadWorkflow={
+    asset.workflow_export_available
+      ? () => void downloadWorkflow(asset.id, asset.filename)
+      : undefined
+  }
+  onTagged={() => {
+    // Refresh current page in place instead of full reload
+    void load(filters, page, false);
+  }}
+/>
+```
+
+---
+
+### 3.5 Asset Detail page — Improve workflow download section
+
+**File:** `frontend/app/assets/[id]/page.tsx`
+
+Current state: the download button only appears when `workflow_export_available` is `true` and only covers ComfyUI. After fix 2.6 (A1111 export), `workflow_export_available` will also be true for A1111 images.
+
+Additionally, add a secondary "Extract from File" button that calls the new `/workflow/extract-from-file` endpoint. This allows recovery of workflows from images that were scanned before v1.8:
+
+```tsx
+{asset.workflow_export_available ? (
+  <button
+    type="button"
+    className="button ghost-button small-button"
+    onClick={() => void downloadWorkflow(asset.id, asset.filename)}
+  >
+    ⬇ Download Workflow JSON
+  </button>
+) : (
+  <button
+    type="button"
+    className="button subtle-button small-button"
+    title="Re-extract workflow directly from the image file (for images scanned before v1.8)"
+    onClick={() => void downloadWorkflowFromFile(asset.id, asset.filename)}
+  >
+    ⬇ Try Extract from File
+  </button>
+)}
+```
+
+Add `downloadWorkflowFromFile` to `frontend/lib/api.ts`:
+
+```ts
+export async function downloadWorkflowFromFile(assetId: string, filename: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/assets/${assetId}/workflow/extract-from-file`, {
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const body = response.headers.get("content-type")?.includes("application/json")
+      ? await response.json()
+      : null;
+    throw new Error(body?.detail ?? "No workflow found in file.");
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename.endsWith(".json") ? filename : `${filename}_workflow.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+```
+
+---
+
+## Part 4 — UI Improvements
+
+### 4.1 Toast / feedback system
+
+Currently errors surface via `setError(...)` which renders a bare panel. There is no success feedback for copy/download operations. Add a lightweight toast hook.
+
+**New file:** `frontend/components/use-toast.tsx`
+
+```tsx
+import { useState, useCallback } from "react";
+
+export type Toast = { id: number; message: string; type: "success" | "error" };
+
+let _nextId = 0;
+
+export function useToast() {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const push = useCallback((message: string, type: Toast["type"] = "success") => {
+    const id = _nextId++;
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3500);
+  }, []);
+
+  return { toasts, push };
+}
+```
+
+**New file:** `frontend/components/ToastContainer.tsx`
+
+A fixed bottom-right stack of dismissible toasts. CSS: `position: fixed; bottom: 1rem; right: 1rem; z-index: 9999; display: flex; flex-direction: column; gap: 0.5rem`.
+
+Replace ad-hoc `navigator.clipboard` / download success paths throughout to call `push("Copied!", "success")` or `push("Download started", "success")`.
+
+---
+
+### 4.2 Asset Detail page layout cleanup
+
+**File:** `frontend/app/assets/[id]/page.tsx`
+
+Current `.asset-detail-layout` is a CSS grid with all four panels. On narrow viewports the layout breaks into a single column but the order (preview → curation → prompts → metadata) could be better. Suggested order:
+
+1. Preview (full width on mobile)
+2. Prompts (most visually interesting content)
+3. Curation (rating, review)
+4. Normalized Metadata
+
+Reorder the `<article>` elements accordingly. No CSS grid changes needed — the existing `stack` layout handles reordering.
+
+---
+
+### 4.3 Keyboard shortcut `W` for workflow download in Image Explorer
+
+**File:** `frontend/components/image-explorer-overlay.tsx`
+
+The overlay already lists `[D] Download workflow` in its help panel (line ~244) and already calls `downloadWorkflow` for the `D` key. This is already implemented correctly. ✅
+
+Add `W` as an alias (natural mnemonic = **W**orkflow) alongside `D`:
+
+```ts
+case "w":
+case "d":
+  if (currentItem?.workflowAvailable && currentItem.key) {
+    void downloadWorkflow(currentItem.key, currentItem.title);
+  }
+  break;
+```
+
+Update the help text: `[D / W] Download workflow`.
+
+---
+
+### 4.4 Improve stale metadata banner
+
+**File:** `frontend/app/assets/[id]/page.tsx`
+
+The current stale metadata banner says "Start a new source scan". Add a direct link to the scan trigger:
+
+```tsx
+{staleMetadata ? (
+  <section className="panel stack">
+    <div className="row-between">
+      <div>
+        <p className="eyebrow">Metadata Refresh</p>
+        <h2>Prompt extraction can be refreshed</h2>
+        <p className="subdued">
+          This asset was indexed with an older metadata schema (v{metadataVersion(asset.normalized_metadata)}).
+          Trigger a rescan to refresh prompt parsing, tags, and workflow extraction.
+        </p>
+      </div>
+      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <button
+          className="button subtle-button small-button"
+          onClick={() => void downloadWorkflowFromFile(asset.id, asset.filename)}
+        >
+          Try Extract Workflow from File
+        </button>
+        <Link href={browseHref} className="button small-button">
+          Open Source Scan
+        </Link>
+      </div>
+    </div>
+  </section>
+) : null}
+```
+
+---
+
+## Part 5 — New Tool Proposals
+
+### 5.1 Tool: Batch Metadata Export
+
+**Description:** Export metadata for all selected assets (or a filtered search result set) as a single CSV or JSON file.
+
+**Backend — new endpoint:**
+
+```
+POST /assets/export-metadata
+Body: { asset_ids: string[] } | { query: SearchFilters }
+Response: application/json or text/csv (Accept header)
+```
+
+**File:** `backend/src/media_indexer_backend/api/routes/assets.py`
+
+The endpoint queries all requested asset IDs, builds a flat dict per asset (id, filename, source, generator, width, height, prompt, negative_prompt, rating, tags), and returns as CSV using Python's `csv.DictWriter` streamed via `StreamingResponse`.
+
+**Frontend:**
+
+Add an "Export Metadata" button to `BulkActionBar` (`frontend/components/bulk-action-bar.tsx`). When bulk assets are selected, the button calls the new endpoint and triggers a file download.
+
+---
+
+### 5.2 Tool: GPS Mini-map on Asset Detail
+
+**Description:** When an asset has GPS coordinates in its normalized metadata, show an embedded static map preview on the detail page.
+
+**Files:** `frontend/app/assets/[id]/page.tsx`, `frontend/lib/types.ts`
+
+The normalized metadata already stores `gps_latitude` and `gps_longitude` when present (extracted by exiftool). Check for them in the detail page:
+
+```tsx
+const gpsLat = typeof asset.normalized_metadata.gps_latitude === "number"
+  ? asset.normalized_metadata.gps_latitude : null;
+const gpsLon = typeof asset.normalized_metadata.gps_longitude === "number"
+  ? asset.normalized_metadata.gps_longitude : null;
+
+...
+
+{gpsLat !== null && gpsLon !== null ? (
+  <article className="panel stack">
+    <p className="eyebrow">Location</p>
+    <h2>GPS Coordinates</h2>
+    <p className="subdued">{gpsLat.toFixed(6)}°, {gpsLon.toFixed(6)}°</p>
+    <a
+      href={`https://www.openstreetmap.org/?mlat=${gpsLat}&mlon=${gpsLon}&zoom=14`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="button ghost-button small-button"
+    >
+      Open in OpenStreetMap ↗
+    </a>
+  </article>
+) : null}
+```
+
+No backend changes needed. For v1.9 this can be enhanced with an inline tile map (Leaflet.js).
+
+---
+
+## Part 6 — File Change Summary
+
+| File | Change Type | Notes |
+|------|------------|-------|
+| `worker/src/media_indexer_worker/services/extractors.py` | **Extend** | Add `extract_png_metadata_chunks()` with stealth PNG support |
+| `worker/src/media_indexer_worker/services/scanner.py` | **Extend** | Call `extract_png_metadata_chunks` and merge into exif dict |
+| `worker/pyproject.toml` | **Extend** | Add `numpy` if not present |
+| `backend/.../services/workflow_export.py` | **Extend** | Add `build_a1111_workflow_export`, `build_workflow_export` dispatcher |
+| `backend/.../services/extractors.py` | **New file** | Backend-side PNG chunk extractor (shared logic with worker) |
+| `backend/.../api/routes/assets.py` | **Extend** | Add `/workflow/extract-from-file` endpoint; update callers to `build_workflow_export` |
+| `backend/.../schemas/asset.py` | **Extend** | Add `workflow_export_available: bool = False` to `AssetSummary` |
+| `backend/.../services/asset_service.py` | **Extend** | Populate `workflow_export_available` in `_asset_summary()` |
+| `frontend/lib/api.ts` | **Extend** | Add `downloadWorkflowFromFile()` |
+| `frontend/lib/types.ts` | **Extend** | Add `workflow_export_available` to `AssetSummary` interface |
+| `frontend/components/asset-card.tsx` | **Extend** | Add `onDownloadWorkflow`, `onTagged` props; remove `window.location.reload()` |
+| `frontend/components/gallery-tile.tsx` | **Extend** | Add `workflowAvailable` prop + badge |
+| `frontend/components/use-toast.tsx` | **New file** | Lightweight toast hook |
+| `frontend/components/ToastContainer.tsx` | **New file** | Toast UI component |
+| `frontend/app/assets/[id]/page.tsx` | **Extend** | Add "Extract from File" button, fix prompt panel guard, GPS panel, stale banner improvement |
+| `frontend/app/browse-indexed/page.tsx` | **Extend** | Pass `workflowAvailable` to `GalleryTile` |
+| `frontend/app/search/page.tsx` | **Extend** | Pass `onDownloadWorkflow` and `onTagged` to `AssetCard` |
+| `frontend/components/image-explorer-overlay.tsx` | **Extend** | Add `W` key alias for workflow download |
+| `frontend/app/globals.css` | **Extend** | Add `.gallery-workflow-badge` rule |
+
+---
+
+## Part 7 — Migration / Alembic
+
+No new DB columns needed for v1.8. The stealth PNG extraction and A1111 export are all computed at runtime from existing `raw_json` / file-on-disk.
+
+**Optional rescan prompt:** After deploying v1.8, users should be encouraged to rescan their sources to populate the improved stealth PNG metadata. Consider adding a one-time admin banner: "v1.8 introduced improved workflow extraction — a rescan is recommended to update existing ComfyUI assets."
+
+---
+
+## Part 8 — Testing
+
+Add to `backend/tests/`:
+
+- `test_png_extractor.py` — unit tests for `extract_png_metadata_chunks`. Use `io.BytesIO` to construct minimal PNG files with known `tEXt` chunks. Test: standard chunk, iTXt chunk, stealth compressed, no-workflow PNG, non-PNG file.
+- `test_workflow_export.py` — unit tests for `build_workflow_export`. Cover: ComfyUI with both prompt+workflow, ComfyUI with only prompt, A1111 parameters block, no generator.
+
+Extend `backend/tests/test_metadata.py` with A1111 round-trip: `normalize_metadata` → `build_workflow_export` → check `generator == "automatic1111"`.
+
+---
+
+## Suggested Commit Order
+
+```
+feat(worker): extract_png_metadata_chunks with stealth PNG support
+feat(worker): integrate PNG chunk reader into scanner
+feat(backend): add build_a1111_workflow_export and build_workflow_export dispatcher
+feat(backend): add /assets/{id}/workflow/extract-from-file endpoint
+fix(backend): add workflow_export_available to AssetSummary schema
+fix(frontend): remove window.location.reload() from AssetCard, add onTagged callback
+feat(frontend): add downloadWorkflowFromFile to api.ts
+feat(frontend): thread workflow download into search page AssetCard
+feat(frontend): gallery-tile workflow badge
+feat(frontend): toast system (use-toast + ToastContainer)
+feat(frontend): GPS mini-map on asset detail page
+fix(frontend): guard prompt extraction panel on detail page
+feat(frontend): W key alias for workflow download in image explorer
+feat(frontend): stale metadata banner extract-from-file shortcut
+feat(frontend): batch metadata export button in bulk action bar (optional if time)
+```

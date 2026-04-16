@@ -6,19 +6,22 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { AssetCard } from "@/components/asset-card";
+import { BottomSheet } from "@/components/BottomSheet";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { CompareSelectionTray } from "@/components/compare-selection-tray";
 import { CollectionPickerModal } from "@/components/collection-picker-modal";
 import { FilterSidebar } from "@/components/filter-sidebar";
-import { addAssetsToCollection, addSearchResultsToCollection, fetchCollections, fetchSearch, fetchTags } from "@/lib/api";
+import { addAssetsToCollection, addSearchResultsToCollection, downloadWorkflow, fetchCollections, fetchSearch, fetchTags } from "@/lib/api";
 import { buildSearchQuery, DEFAULT_SEARCH_FILTERS, parseSearchFilterState, parseTagList, removeTagFilter } from "@/lib/search-filters";
 import { useAuth } from "@/components/auth-provider";
+import { useSettings } from "@/components/settings-provider";
 import { AssetListResponse, AssetSummary, CollectionSummary, ReviewStatus, SearchFilterFormState, TagCount } from "@/lib/types";
 
 function SearchPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
+  const { nsfwVisible } = useSettings();
   const searchParamKey = searchParams.toString();
   const [filters, setFilters] = useState<SearchFilterFormState>(DEFAULT_SEARCH_FILTERS);
   const [results, setResults] = useState<AssetListResponse | null>(null);
@@ -34,6 +37,8 @@ function SearchPageContent() {
   const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // v1.6: detect mobile to switch sidebar → BottomSheet for proper touch scroll
+  const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
   const [collectionOpen, setCollectionOpen] = useState(false);
   const [collectionBusy, setCollectionBusy] = useState(false);
   const [collectionMode, setCollectionMode] = useState<"selected" | "search-results">("selected");
@@ -53,6 +58,7 @@ function SearchPageContent() {
         page: nextPage,
         min_rating: nextFilters.min_rating ? Number(nextFilters.min_rating) : undefined,
         review_status: (nextFilters.review_status as ReviewStatus) || undefined,
+        exclude_tags: !nsfwVisible ? "nsfw" : undefined,
       };
       const nextResults = await fetchSearch(apiFilters);
       setResults((current) =>
@@ -102,11 +108,16 @@ function SearchPageContent() {
 
   useEffect(() => {
     const nextFilters = parseSearchFilterState(searchParams);
+    // v1.6: If sort=relevance but there's no query, fall back to modified_at so
+    // the page always shows all images on load instead of an empty result set.
+    if (nextFilters.sort === "relevance" && !nextFilters.q.trim()) {
+      nextFilters.sort = "modified_at";
+    }
     setFilters(nextFilters);
     setPage(1);
     setSelected([]);
     void load(nextFilters, 1, false);
-  }, [searchParamKey]);
+  }, [searchParamKey, nsfwVisible]);
 
   useEffect(() => {
     if (page === 1) {
@@ -252,33 +263,66 @@ function SearchPageContent() {
         }}
       />
       <div className="search-layout">
-        <button
-          type="button"
-          aria-label="Close filters"
-          className={`search-overlay ${filtersOpen ? "search-overlay-visible" : ""}`}
-          onClick={() => setFiltersOpen(false)}
-        />
-        <aside className={`search-sidebar ${filtersOpen ? "search-sidebar-open" : ""}`}>
-          <div className="search-sidebar-header">
-            <div>
-              <p className="eyebrow">Search Filters</p>
-              <h2>Refine the index</h2>
+        {/* v1.6 — Mobile: filters open in a BottomSheet so users can scroll and tap freely */}
+        {isMobile ? (
+          <BottomSheet
+            open={filtersOpen}
+            onClose={() => setFiltersOpen(false)}
+            title="Search Filters"
+            subtitle="Refine the index"
+          >
+            <FilterSidebar value={filters} onChange={setFilters} tagSuggestions={tagSuggestions} />
+            <div className="search-sidebar-actions" style={{ marginTop: "0.5rem" }}>
+              <button className="button ghost-button small-button" type="button" onClick={resetFilters}>
+                Reset
+              </button>
+              <button className="button small-button" type="button" onClick={applyFilters}>
+                Apply Filters
+              </button>
             </div>
-            <button className="button ghost-button small-button search-sidebar-close" type="button" onClick={() => setFiltersOpen(false)}>
-              Close
-            </button>
-          </div>
-          <FilterSidebar value={filters} onChange={setFilters} tagSuggestions={tagSuggestions} />
-          <div className="search-sidebar-actions">
-            <button className="button ghost-button small-button" type="button" onClick={resetFilters}>
-              Reset
-            </button>
-            <button className="button small-button" type="button" onClick={applyFilters}>
-              Apply Filters
-            </button>
-          </div>
-        </aside>
+          </BottomSheet>
+        ) : (
+          <>
+            <button
+              type="button"
+              aria-label="Close filters"
+              className={`search-overlay ${filtersOpen ? "search-overlay-visible" : ""}`}
+              onClick={() => setFiltersOpen(false)}
+            />
+            <aside className={`search-sidebar ${filtersOpen ? "search-sidebar-open" : ""}`}>
+              <div className="search-sidebar-header">
+                <div>
+                  <p className="eyebrow">Search Filters</p>
+                  <h2>Refine the index</h2>
+                </div>
+                <button className="button ghost-button small-button search-sidebar-close" type="button" onClick={() => setFiltersOpen(false)}>
+                  Close
+                </button>
+              </div>
+              <FilterSidebar value={filters} onChange={setFilters} tagSuggestions={tagSuggestions} />
+              <div className="search-sidebar-actions">
+                <button className="button ghost-button small-button" type="button" onClick={resetFilters}>
+                  Reset
+                </button>
+                <button className="button small-button" type="button" onClick={applyFilters}>
+                  Apply Filters
+                </button>
+              </div>
+            </aside>
+          </>
+        )}
         <section className="stack search-results">
+          {bulkMode && bulkSelectedIds.length > 0 && (
+            <BulkActionBar
+              selectedIds={bulkSelectedIds}
+              onClear={() => setBulkSelectedIds([])}
+              onDone={() => { 
+                setBulkSelectedIds([]); 
+                setBulkMode(false); 
+                void load(filters, 1, false);
+              }}
+            />
+          )}
           <CompareSelectionTray
             selectionMode={selectionMode}
             selectedCount={selected.length}
@@ -297,15 +341,8 @@ function SearchPageContent() {
                 : undefined
             }
           />
-          {bulkMode && bulkSelectedIds.length > 0 && (
-            <BulkActionBar
-              selectedIds={bulkSelectedIds}
-              onClear={() => setBulkSelectedIds([])}
-              onDone={() => { setBulkSelectedIds([]); setBulkMode(false); }}
-            />
-          )}
           {!selectionMode && (
-            <div style={{ paddingBottom: "0.5rem" }}>
+            <div className="page-actions results-header" style={{ paddingBottom: "0.5rem" }}>
               <button
                 type="button"
                 className={`button small-button ${bulkMode ? "" : "ghost-button"}`}
@@ -388,6 +425,12 @@ function SearchPageContent() {
                       }
                     : undefined
                 }
+                onDownloadWorkflow={
+                  asset.workflow_export_available
+                    ? () => void downloadWorkflow(asset.id, asset.filename)
+                    : undefined
+                }
+                onTagged={() => void load(filters, page, false)}
               />
             ))}
           </div>

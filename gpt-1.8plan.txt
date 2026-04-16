@@ -1,0 +1,302 @@
+# Media Indexer v1.8 – Implementation Plan
+
+## 🎯 Goals
+
+* Add **workflow extraction from images**
+* Improve **UX/UI of asset detail & browsing**
+* Introduce **downloadable structured workflows**
+* Enhance **search, tagging, and automation tools**
+* Improve **performance and extensibility**
+
+---
+
+# 1. 🧠 Workflow Extraction from Images
+
+## 1.1 Objective
+
+Automatically extract structured workflows (nodes, steps, connections) from images such as:
+
+* Flowcharts
+* UI screenshots (e.g., ComfyUI, Node-based tools)
+* Diagrams
+
+## 1.2 Backend Implementation
+
+### New Module
+
+`services/workflow_extractor.py`
+
+### Responsibilities
+
+* Image preprocessing (resize, contrast)
+* OCR extraction (Tesseract / PaddleOCR)
+* Layout parsing (bounding boxes)
+* Node detection (basic heuristics or ML later)
+* Edge inference (spatial relationships)
+
+### Output Schema (NEW)
+
+```json
+{
+  "nodes": [
+    { "id": "1", "label": "Load Image", "type": "input", "position": { "x": 10, "y": 20 } }
+  ],
+  "edges": [
+    { "from": "1", "to": "2" }
+  ],
+  "raw_text": "...",
+  "confidence": 0.82
+}
+```
+
+### Database Changes
+
+Add to `assets` table:
+
+* `workflow_json` (JSONB)
+* `workflow_extracted_at` (timestamp)
+* `workflow_version` (string)
+
+Migration: `0007_workflow_extraction.py`
+
+---
+
+## 1.3 API Endpoints
+
+### POST `/assets/{id}/extract-workflow`
+
+* Triggers extraction
+* Stores result
+
+### GET `/assets/{id}/workflow`
+
+* Returns structured workflow JSON
+
+### GET `/assets/{id}/workflow/download`
+
+* Returns downloadable JSON file
+
+---
+
+# 2. 📥 Workflow Download Feature
+
+## 2.1 Backend
+
+* Add endpoint returning:
+
+  * `application/json`
+  * filename: `workflow_<asset_id>.json`
+
+## 2.2 Frontend
+
+### Asset Detail Page
+
+Add:
+
+* "Download Workflow" button
+* Disabled state if no workflow exists
+
+### Right-click Menu (NEW)
+
+* "Download workflow"
+* "Copy workflow JSON"
+* "Re-run extraction"
+
+---
+
+# 3. 🎨 UI Improvements
+
+## 3.1 Asset Detail Page Redesign
+
+Split into tabs:
+
+* Preview
+* Metadata
+* Workflow (NEW)
+* Similar Assets
+
+### Workflow Tab
+
+* Visual graph (React Flow / D3)
+* Toggle:
+
+  * Graph view
+  * Raw JSON
+* Confidence indicator
+
+---
+
+## 3.2 Grid View Improvements
+
+* Hover preview (zoom)
+* Quick actions overlay:
+
+  * ⭐ Favorite
+  * 🏷 Tag
+  * ⬇ Download workflow (if exists)
+
+---
+
+## 3.3 Search UX Upgrade
+
+* Add filters:
+
+  * Has workflow
+  * Extraction confidence
+* Smart suggestions (based on tags + OCR text)
+
+---
+
+## 3.4 Bulk Actions
+
+* Multi-select assets:
+
+  * Extract workflows
+  * Export workflows
+  * Batch tagging
+
+---
+
+# 4. 🧰 New Tools / Features
+
+## 4.1 Smart Auto-Tagging (v1.8 Lite)
+
+* Use OCR text + filename
+* Suggest tags
+* Store as "suggested_tags"
+
+---
+
+## 4.2 Similarity Improvements
+
+* Extend existing `compare` route:
+
+  * Add visual similarity (CLIP embeddings)
+  * Add workflow similarity (future-ready)
+
+---
+
+## 4.3 Background Jobs Upgrade
+
+Extend scan_jobs:
+
+* Add queue for:
+
+  * workflow extraction
+  * OCR
+* Add statuses:
+
+  * `pending_extraction`
+  * `processing_workflow`
+  * `completed`
+
+---
+
+## 4.4 Plugin System (Foundation)
+
+Create:
+`plugins/` directory
+
+Allow:
+
+* Custom extractors
+* Custom taggers
+* Future AI integrations
+
+---
+
+# 5. ⚙️ Performance Improvements
+
+## 5.1 Async Processing
+
+* Move extraction to background workers (Celery / RQ)
+
+## 5.2 Caching
+
+* Cache workflow JSON (Redis optional)
+
+## 5.3 Lazy Loading
+
+* Load workflow only when tab is opened
+
+---
+
+# 6. 🔐 Security & Permissions
+
+* Only authenticated users can:
+
+  * Trigger extraction
+  * Download workflows
+* Add role check:
+
+  * admin: bulk extraction
+  * user: single asset
+
+---
+
+# 7. 🧪 Testing
+
+## Add Tests
+
+* Workflow extraction unit tests
+* API endpoint tests
+* JSON schema validation
+
+---
+
+# 8. 📦 Deliverables
+
+## Backend
+
+* New service: workflow_extractor
+* New endpoints
+* DB migration
+
+## Frontend
+
+* Workflow tab
+* Download button
+* Right-click menu
+* Graph visualization
+
+---
+
+# 9. 🚀 Nice-to-Have (Stretch Goals)
+
+* Editable workflows (manual correction UI)
+* Export formats:
+
+  * JSON
+  * YAML
+  * ComfyUI format
+* AI-assisted node detection (future v2.0)
+
+---
+
+# 10. 📅 Suggested Implementation Order
+
+1. DB migration
+2. Workflow extraction service (basic)
+3. API endpoints
+4. Background job integration
+5. Frontend workflow tab
+6. Download + right-click features
+7. UI polish
+8. Performance optimization
+
+---
+
+# ✅ Summary
+
+v1.8 transforms the app from:
+👉 Media indexer
+➡️ Into a **workflow-aware visual knowledge system**
+
+Key upgrade:
+**Images → Structured, downloadable workflows**
+
+This unlocks:
+
+* Automation
+* Reusability
+* AI integration potential

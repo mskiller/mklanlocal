@@ -19,7 +19,10 @@ from media_indexer_backend.services.audit import record_audit_event
 from media_indexer_backend.services.deepzoom import deepzoom_manifest_absolute_path, deepzoom_tile_absolute_path, deepzoom_tiles_absolute_dir
 from media_indexer_backend.services.image_service import ensure_cached_resized_image
 from media_indexer_backend.services.path_safety import resolve_asset_path
-from media_indexer_backend.services.workflow_export import build_comfyui_workflow_export
+from media_indexer_backend.services.workflow_export import build_workflow_export
+from media_indexer_backend.services.extractors import extract_png_metadata_from_file
+from media_indexer_backend.services.workflow_extractor import workflow_extractor
+from media_indexer_backend.services.metadata import normalize_metadata
 
 
 router = APIRouter(tags=["assets"])
@@ -39,6 +42,7 @@ def get_assets(
     duration_min: float | None = None,
     duration_max: float | None = None,
     tags: str | None = None,
+    exclude_tags: str | None = None,
     min_rating: int | None = Query(default=None, ge=1, le=5),
     review_status: ReviewStatus | None = None,
     flagged: bool | None = None,
@@ -62,6 +66,7 @@ def get_assets(
         duration_min=duration_min,
         duration_max=duration_max,
         tags=[value.strip() for value in (tags or "").split(",") if value.strip()],
+        exclude_tags=[value.strip() for value in (exclude_tags or "").split(",") if value.strip()],
         min_rating=min_rating,
         review_status=review_status,
         flagged=flagged,
@@ -75,6 +80,7 @@ def get_assets(
 @router.get("/assets/browse", response_model=AssetBrowseResponse)
 def get_assets_browse(
     source_id: UUID | None = None,
+    exclude_tags: str | None = None,
     min_rating: int | None = Query(default=None, ge=1, le=5),
     review_status: ReviewStatus | None = None,
     flagged: bool | None = None,
@@ -87,6 +93,7 @@ def get_assets_browse(
     return browse_assets(
         session,
         source_id=source_id,
+        exclude_tags=[value.strip() for value in (exclude_tags or "").split(",") if value.strip()],
         min_rating=min_rating,
         review_status=review_status,
         flagged=flagged,
@@ -235,17 +242,90 @@ def get_asset_workflow_download(
     asset = get_asset_or_404(session, asset_id, current_user=current_user)
     raw_metadata = asset.metadata_record.raw_json if asset.metadata_record else {}
     normalized_metadata = asset.metadata_record.normalized_json if asset.metadata_record else {}
-    payload = build_comfyui_workflow_export(
+    payload = build_workflow_export(
         asset_id=str(asset.id),
         filename=asset.filename,
         normalized_metadata=normalized_metadata,
         raw_metadata=raw_metadata,
     )
     if payload is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No ComfyUI workflow export is available for this asset.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="No exportable workflow is available for this asset."
+        )
     filename = f"{asset.filename.rsplit('.', 1)[0]}-workflow.json"
     return Response(
         content=json.dumps(payload, indent=2),
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/assets/{asset_id}/workflow/extract-from-file")
+def extract_asset_workflow_from_file(
+    asset_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_authenticated),
+) -> Response:
+    """
+    Re-reads the asset file directly and extracts embedded workflow/prompt data.
+    Unlike /workflow/download (which reads from DB), this always goes to the file.
+    Returns 404 if no workflow is found in the file.
+    """
+    asset = get_asset_or_404(session, asset_id, current_user=current_user)
+    original_path = resolve_asset_path(asset.source.root_path, asset.relative_path)
+    
+    # Re-run extraction on the live file
+    raw = extract_png_metadata_from_file(original_path)
+    normalized = normalize_metadata(media_type=asset.media_type, exif=raw, ffprobe={})
+    
+    payload = build_workflow_export(
+        asset_id=str(asset.id),
+        filename=asset.filename,
+        normalized_metadata=normalized,
+        raw_metadata=raw,
+    )
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No exportable workflow found in this file.",
+        )
+    
+    filename = f"{asset.filename.rsplit('.', 1)[0]}-workflow.json"
+    return Response(
+        content=json.dumps(payload, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/assets/{asset_id}/workflow/visual-extract")
+def trigger_visual_workflow_extraction(
+    asset_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_authenticated),
+) -> dict:
+    """
+    Trigger Tesseract-based visual workflow extraction from the asset image.
+    Stores structure in DB and returns it.
+    """
+    asset = get_asset_or_404(session, asset_id, current_user=current_user)
+    original_path = resolve_asset_path(asset.source.root_path, asset.relative_path)
+    
+    # 1. Run extraction
+    result = workflow_extractor.extract_visual_workflow(original_path)
+    
+    # 2. Persist to asset
+    asset.visual_workflow_json = result.get("nodes", []) + result.get("edges", []) # Combined for now
+    # Wait, better structured for React Flow:
+    # { "nodes": [...], "edges": [...] }
+    asset.visual_workflow_json = {
+        "nodes": result.get("nodes", []),
+        "edges": result.get("edges", [])
+    }
+    asset.visual_workflow_confidence = result.get("confidence", 0)
+    asset.visual_workflow_updated_at = sa.func.now()
+    
+    session.commit()
+    
+    return result
