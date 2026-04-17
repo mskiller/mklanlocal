@@ -144,6 +144,8 @@ def add_search_results_to_collection(
         session,
         q=payload.q,
         media_type=payload.media_type,
+        caption=payload.caption,
+        ocr_text=payload.ocr_text,
         camera_make=payload.camera_make,
         camera_model=payload.camera_model,
         year=payload.year,
@@ -154,6 +156,7 @@ def add_search_results_to_collection(
         duration_min=payload.duration_min,
         duration_max=payload.duration_max,
         tags=payload.tags,
+        auto_tags=payload.auto_tags,
         current_user=current_user,
     )
     if not asset_ids:

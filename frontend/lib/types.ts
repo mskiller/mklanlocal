@@ -165,6 +165,10 @@ export interface AssetSummary {
   deepzoom_url: string | null;
   tags: string[];
   normalized_metadata: Record<string, unknown>;
+  caption: string | null;
+  caption_source: string | null;
+  ocr_text: string | null;
+  ocr_confidence: number | null;
   annotation: AssetAnnotation | null;
   workflow_export_available: boolean;
 }
@@ -223,6 +227,8 @@ export interface AssetBrowseItem {
   prompt_excerpt: string | null;
   prompt_tags: string[];
   prompt_tag_string: string | null;
+  caption: string | null;
+  ocr_text: string | null;
   annotation: AssetAnnotation | null;
   workflow_export_available: boolean;
 }
@@ -232,6 +238,105 @@ export interface AssetBrowseResponse {
   total: number;
   page: number;
   page_size: number;
+}
+
+export interface TimelineYearBucket {
+  year: number;
+  count: number;
+}
+
+export interface TimelineMonthBucket {
+  month: number;
+  count: number;
+}
+
+export interface TimelineDayBucket {
+  day: number;
+  count: number;
+}
+
+export interface TagVocabularyEntry {
+  id: number;
+  tag: string;
+  description: string | null;
+  clip_prompt: string;
+  enabled: boolean;
+}
+
+export interface TagSuggestion {
+  id: number;
+  asset_id: string;
+  tag: string;
+  tag_group: string | null;
+  confidence: number;
+  source_model: string | null;
+  rank: number | null;
+  raw_score: number | null;
+  threshold_used: number | null;
+  source_payload: Record<string, unknown> | null;
+  status: string;
+  created_at: string;
+}
+
+export interface TagProviderStatus {
+  key: string;
+  label: string;
+  status: string;
+  device: string;
+  source_model: string;
+  warm: boolean;
+  detail: string | null;
+}
+
+export interface TagProvidersResponse {
+  providers: TagProviderStatus[];
+}
+
+export interface TagRebuildResponse {
+  processed_assets: number;
+  created_suggestions: number;
+}
+
+export interface RelatedTag {
+  tag: string;
+  score: number;
+  group: string;
+  source_model: string;
+}
+
+export interface ClusterProposal {
+  centroid_id: string;
+  cover_asset_ids: string[];
+  asset_ids: string[];
+  size: number;
+  suggested_label: string;
+}
+
+export interface ClusteringPendingStatus {
+  status: "processing";
+}
+
+export interface ClusteringErrorStatus {
+  status: "error";
+  message: string;
+}
+
+export type ClusteringResultsResponse = ClusterProposal[] | ClusteringPendingStatus | ClusteringErrorStatus;
+
+export interface PublicShareItem {
+  id: string;
+  filename: string;
+  size_bytes: number;
+  preview_url: string | null;
+  content_url: string | null;
+}
+
+export interface PublicShareResponse {
+  type: "asset" | "collection";
+  label: string;
+  item: PublicShareItem | null;
+  items: PublicShareItem[];
+  allow_download: boolean;
 }
 
 export interface SourceBrowseInspect {
@@ -323,6 +428,8 @@ export interface CompareResponse {
 export interface SearchFilters {
   q?: string;
   media_type?: string;
+  caption?: string;
+  ocr_text?: string;
   camera_make?: string;
   camera_model?: string;
   year?: string;
@@ -333,6 +440,7 @@ export interface SearchFilters {
   duration_min?: string;
   duration_max?: string;
   tags?: string;
+  auto_tags?: string;
   exclude_tags?: string;
   min_rating?: number;
   review_status?: ReviewStatus;
@@ -345,6 +453,8 @@ export interface SearchFilters {
 export interface SearchFilterFormState {
   q: string;
   media_type: string;
+  caption: string;
+  ocr_text: string;
   camera_make: string;
   camera_model: string;
   year: string;
@@ -355,6 +465,7 @@ export interface SearchFilterFormState {
   duration_min: string;
   duration_max: string;
   tags: string;
+  auto_tags: string;
   min_rating: string;
   review_status: string;
   flagged: boolean;

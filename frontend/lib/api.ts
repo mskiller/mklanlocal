@@ -5,10 +5,13 @@ import {
   AssetListResponse,
   AuditLogEntry,
   AuthUser,
+  ClusteringResultsResponse,
   CollectionDetail,
   CollectionSummary,
   CompareResponse,
   GroupSummary,
+  PublicShareResponse,
+  RelatedTag,
   ResetResponse,
   ScanJob,
   ScanJobErrorEntry,
@@ -19,7 +22,14 @@ import {
   SourceBrowseResponse,
   SourceTreeResponse,
   SourceUploadResponse,
+  TagSuggestion,
   TagCount,
+  TagProvidersResponse,
+  TagRebuildResponse,
+  TagVocabularyEntry,
+  TimelineDayBucket,
+  TimelineMonthBucket,
+  TimelineYearBucket,
   UserRole,
   UserStatus,
   UserSummary,
@@ -38,7 +48,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: "include",
     headers: {
@@ -79,37 +89,37 @@ export function assetImageUrl(id: string, options: { w?: number; h?: number; qua
 }
 
 export function login(username: string, password: string) {
-  return request<AuthUser>("/auth/login", {
+  return apiFetch<AuthUser>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
 }
 
 export function logout() {
-  return request<void>("/auth/logout", { method: "POST" });
+  return apiFetch<void>("/auth/logout", { method: "POST" });
 }
 
 export function fetchMe() {
-  return request<AuthUser>("/auth/me");
+  return apiFetch<AuthUser>("/auth/me");
 }
 
 export function changePassword(payload: { current_password: string; new_password: string; confirm_password: string }) {
-  return request<void>("/auth/change-password", {
+  return apiFetch<void>("/auth/change-password", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export function fetchSources() {
-  return request<Source[]>("/sources");
+  return apiFetch<Source[]>("/sources");
 }
 
 export function fetchSource(id: string) {
-  return request<Source>(`/sources/${id}`);
+  return apiFetch<Source>(`/sources/${id}`);
 }
 
 export function createSource(payload: { name: string; root_path: string; type: string }) {
-  return request<Source>("/sources", {
+  return apiFetch<Source>("/sources", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -117,73 +127,73 @@ export function createSource(payload: { name: string; root_path: string; type: s
 
 export function fetchSourceBrowse(id: string, path = "") {
   const query = path ? `?path=${encodeURIComponent(path)}` : "";
-  return request<SourceBrowseResponse>(`/sources/${id}/browse${query}`);
+  return apiFetch<SourceBrowseResponse>(`/sources/${id}/browse${query}`);
 }
 
 export function fetchSourceInspect(id: string, path: string) {
-  return request<SourceBrowseInspect>(`/sources/${id}/browse/inspect?path=${encodeURIComponent(path)}`);
+  return apiFetch<SourceBrowseInspect>(`/sources/${id}/browse/inspect?path=${encodeURIComponent(path)}`);
 }
 
 export function fetchSourceTree(id: string, path = "") {
   const query = path ? `?path=${encodeURIComponent(path)}` : "";
-  return request<SourceTreeResponse>(`/sources/${id}/tree${query}`);
+  return apiFetch<SourceTreeResponse>(`/sources/${id}/tree${query}`);
 }
 
 export function deleteSource(id: string) {
-  return request<void>(`/sources/${id}`, { method: "DELETE" });
+  return apiFetch<void>(`/sources/${id}`, { method: "DELETE" });
 }
 
 export function triggerScan(id: string) {
-  return request<ScanJob>(`/sources/${id}/scan`, { method: "POST" });
+  return apiFetch<ScanJob>(`/sources/${id}/scan`, { method: "POST" });
 }
 
 export function fetchScanJobs() {
-  return request<ScanJob[]>("/scan-jobs");
+  return apiFetch<ScanJob[]>("/scan-jobs");
 }
 
 export function fetchScanJob(id: string) {
-  return request<ScanJob>(`/scan-jobs/${id}`);
+  return apiFetch<ScanJob>(`/scan-jobs/${id}`);
 }
 
 export function fetchScanJobErrors(id: string) {
-  return request<ScanJobErrorEntry[]>(`/scan-jobs/${id}/errors`);
+  return apiFetch<ScanJobErrorEntry[]>(`/scan-jobs/${id}/errors`);
 }
 
 export function cancelScanJob(id: string) {
-  return request<ScanJob>(`/scan-jobs/${id}/cancel`, { method: "POST" });
+  return apiFetch<ScanJob>(`/scan-jobs/${id}/cancel`, { method: "POST" });
 }
 
 export function fetchAssets(filters: SearchFilters = {}) {
-  return request<AssetListResponse>(`/assets${buildQuery(filters)}`);
+  return apiFetch<AssetListResponse>(`/assets${buildQuery(filters)}`);
 }
 
 export function fetchAssetBrowse(filters: { source_id?: string; sort?: string; page?: number; page_size?: number; exclude_tags?: string } = {}) {
   const query = buildQuery(filters);
-  return request<AssetBrowseResponse>(`/assets/browse${query}`);
+  return apiFetch<AssetBrowseResponse>(`/assets/browse${query}`);
 }
 
 export function fetchAsset(id: string) {
-  return request<AssetDetail>(`/assets/${id}`);
+  return apiFetch<AssetDetail>(`/assets/${id}`);
 }
 
 export function fetchSearch(filters: SearchFilters = {}) {
-  return request<AssetListResponse>(`/search${buildQuery(filters)}`);
+  return apiFetch<AssetListResponse>(`/search${buildQuery(filters)}`);
 }
 
 export function fetchTags() {
-  return request<TagCount[]>("/tags");
+  return apiFetch<TagCount[]>("/tags");
 }
 
 export function fetchTagAssets(tag: string, page = 1, pageSize = 24) {
-  return request<AssetListResponse>(`/tags/${encodeURIComponent(tag)}/assets?page=${page}&page_size=${pageSize}`);
+  return apiFetch<AssetListResponse>(`/tags/${encodeURIComponent(tag)}/assets?page=${page}&page_size=${pageSize}`);
 }
 
 export function fetchSimilar(id: string, type: "duplicate" | "semantic" | "tag", limit = 50) {
-  return request<SimilarAsset[]>(`/assets/${id}/similar?type=${type}&limit=${limit}`);
+  return apiFetch<SimilarAsset[]>(`/assets/${id}/similar?type=${type}&limit=${limit}`);
 }
 
 export function fetchSimilarByImage(id: string, limit = 24) {
-  return request<SimilarAsset[]>(`/assets/${id}/search-similar-by-image?limit=${limit}`);
+  return apiFetch<SimilarAsset[]>(`/assets/${id}/search-similar-by-image?limit=${limit}`);
 }
 
 export function bulkAnnotateAssets(payload: {
@@ -194,36 +204,36 @@ export function bulkAnnotateAssets(payload: {
   note?: string | null;
   tags?: string[] | null;
 }) {
-  return request<void>("/assets/bulk-annotate", {
+  return apiFetch<void>("/assets/bulk-annotate", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export function fetchCompare(a: string, b: string) {
-  return request<CompareResponse>(`/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
+  return apiFetch<CompareResponse>(`/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
 }
 
 export function submitCompareReview(assetIdA: string, assetIdB: string, action: string) {
-  return request<void>("/compare/review", {
+  return apiFetch<void>("/compare/review", {
     method: "POST",
     body: JSON.stringify({ asset_id_a: assetIdA, asset_id_b: assetIdB, action }),
   });
 }
 
 export function resetApplicationData(mode: "index" | "all") {
-  return request<ResetResponse>("/admin/reset", {
+  return apiFetch<ResetResponse>("/admin/reset", {
     method: "POST",
     body: JSON.stringify({ mode }),
   });
 }
 
 export function fetchAdminUsers() {
-  return request<UserSummary[]>("/admin/users");
+  return apiFetch<UserSummary[]>("/admin/users");
 }
 
 export function createAdminUser(payload: { username: string; password: string; role: UserRole }) {
-  return request<UserSummary>("/admin/users", {
+  return apiFetch<UserSummary>("/admin/users", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -240,25 +250,25 @@ export function updateAdminUser(
     group_ids?: string[];
   }
 ) {
-  return request<UserSummary>(`/admin/users/${id}`, {
+  return apiFetch<UserSummary>(`/admin/users/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
 }
 
 export function deleteAdminUser(id: string) {
-  return request<void>(`/admin/users/${id}`, { method: "DELETE" });
+  return apiFetch<void>(`/admin/users/${id}`, { method: "DELETE" });
 }
 
 export function fetchGroups() {
-  return request<GroupSummary[]>("/admin/groups");
+  return apiFetch<GroupSummary[]>("/admin/groups");
 }
 
 // Aliases used by /admin/groups and /admin/users pages
 export const fetchAdminGroups = fetchGroups;
 
 export function createGroup(payload: { name: string; description: string; permissions: Record<string, unknown> }) {
-  return request<GroupSummary>("/admin/groups", {
+  return apiFetch<GroupSummary>("/admin/groups", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -267,7 +277,7 @@ export function createGroup(payload: { name: string; description: string; permis
 export const createAdminGroup = createGroup;
 
 export function updateGroup(id: string, payload: { name?: string; description?: string; permissions?: Record<string, unknown> }) {
-  return request<GroupSummary>(`/admin/groups/${id}`, {
+  return apiFetch<GroupSummary>(`/admin/groups/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
@@ -276,35 +286,35 @@ export function updateGroup(id: string, payload: { name?: string; description?: 
 export const updateAdminGroup = updateGroup;
 
 export function deleteGroup(id: string) {
-  return request<void>(`/admin/groups/${id}`, { method: "DELETE" });
+  return apiFetch<void>(`/admin/groups/${id}`, { method: "DELETE" });
 }
 
 export const deleteAdminGroup = deleteGroup;
 
 export function resetAdminUserPassword(id: string, newPassword: string) {
-  return request<void>(`/admin/users/${id}/password`, {
+  return apiFetch<void>(`/admin/users/${id}/password`, {
     method: "POST",
     body: JSON.stringify({ new_password: newPassword }),
   });
 }
 
 export function fetchAuditLogs(limit = 50) {
-  return request<AuditLogEntry[]>(`/admin/audit-logs?limit=${limit}`);
+  return apiFetch<AuditLogEntry[]>(`/admin/audit-logs?limit=${limit}`);
 }
 
 export function fetchAdminSettings() {
-  return request<AdminSettings>("/admin/settings");
+  return apiFetch<AdminSettings>("/admin/settings");
 }
 
 export function updateAdminSettings(payload: AdminSettings) {
-  return request<AdminSettings>("/admin/settings", {
+  return apiFetch<AdminSettings>("/admin/settings", {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
 }
 
 export function rebuildTagSimilarity() {
-  return request<{ rebuilt_assets: number; rebuilt_links: number }>("/admin/settings/rebuild-tag-similarity", {
+  return apiFetch<{ rebuilt_assets: number; rebuilt_links: number }>("/admin/settings/rebuild-tag-similarity", {
     method: "POST",
   });
 }
@@ -331,45 +341,45 @@ export async function restoreBackup(file: File, options: { dryRun?: boolean; con
 }
 
 export function purgeDeepzoom() {
-  return request<{ deleted_tile_directories: number; deleted_manifests: number }>("/admin/purge-deepzoom", {
+  return apiFetch<{ deleted_tile_directories: number; deleted_manifests: number }>("/admin/purge-deepzoom", {
     method: "POST",
   });
 }
 
 export function reindexSearch() {
-  return request<{ rebuilt_assets: number }>("/admin/reindex-search", {
+  return apiFetch<{ rebuilt_assets: number }>("/admin/reindex-search", {
     method: "POST",
   });
 }
 
 export function fetchCollections() {
-  return request<CollectionSummary[]>("/collections");
+  return apiFetch<CollectionSummary[]>("/collections");
 }
 
 export function createCollection(payload: { name: string; description: string }) {
-  return request<CollectionSummary>("/collections", {
+  return apiFetch<CollectionSummary>("/collections", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export function fetchCollection(id: string, page = 1, pageSize = 36) {
-  return request<CollectionDetail>(`/collections/${id}?page=${page}&page_size=${pageSize}`);
+  return apiFetch<CollectionDetail>(`/collections/${id}?page=${page}&page_size=${pageSize}`);
 }
 
 export function updateCollection(id: string, payload: { name?: string; description?: string }) {
-  return request<CollectionSummary>(`/collections/${id}`, {
+  return apiFetch<CollectionSummary>(`/collections/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
 }
 
 export function deleteCollection(id: string) {
-  return request<void>(`/collections/${id}`, { method: "DELETE" });
+  return apiFetch<void>(`/collections/${id}`, { method: "DELETE" });
 }
 
 export function addAssetsToCollection(id: string, assetIds: string[]) {
-  return request<CollectionDetail>(`/collections/${id}/assets`, {
+  return apiFetch<CollectionDetail>(`/collections/${id}/assets`, {
     method: "POST",
     body: JSON.stringify({ asset_ids: assetIds }),
   });
@@ -380,6 +390,8 @@ export function addSearchResultsToCollection(
   payload: {
     q?: string;
     media_type?: string;
+    caption?: string;
+    ocr_text?: string;
     camera_make?: string;
     camera_model?: string;
     year?: number;
@@ -390,16 +402,17 @@ export function addSearchResultsToCollection(
     duration_min?: number;
     duration_max?: number;
     tags?: string[];
+    auto_tags?: string[];
   }
 ) {
-  return request<CollectionDetail>(`/collections/${id}/search-results`, {
+  return apiFetch<CollectionDetail>(`/collections/${id}/search-results`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export function removeAssetFromCollection(id: string, assetId: string) {
-  return request<void>(`/collections/${id}/assets/${assetId}`, { method: "DELETE" });
+  return apiFetch<void>(`/collections/${id}/assets/${assetId}`, { method: "DELETE" });
 }
 
 export async function uploadToSource(id: string, files: File[], folder = "") {
@@ -462,3 +475,90 @@ export async function downloadWorkflowFromFile(assetId: string, filename: string
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+// --- Feature 1: Timeline ---
+export function fetchTimelineYears(sourceId?: string) {
+  return apiFetch<TimelineYearBucket[]>("/timeline/years" + buildQuery({ source_id: sourceId }));
+}
+export function fetchTimelineMonths(year: number, sourceId?: string) {
+  return apiFetch<TimelineMonthBucket[]>("/timeline/months" + buildQuery({ year, source_id: sourceId }));
+}
+export function fetchTimelineDays(year: number, month: number, sourceId?: string) {
+  return apiFetch<TimelineDayBucket[]>("/timeline/days" + buildQuery({ year, month, source_id: sourceId }));
+}
+export function fetchTimelineAssets(year: number, month?: number, day?: number, page: number = 1) {
+  const limit = 50;
+  const offset = (page - 1) * limit;
+  return apiFetch<AssetListResponse>("/timeline/assets" + buildQuery({ year, month, day, limit, offset }));
+}
+
+// --- Feature 2: Clustering ---
+export function triggerClustering(k: number, minSize: number) {
+  return apiFetch<{ job_id: string }>("/admin/clustering/suggest", {
+    method: "POST",
+    body: JSON.stringify({ k, min_size: minSize }),
+  });
+}
+export function fetchClusteringResults(jobId: string) {
+  return apiFetch<ClusteringResultsResponse>(`/admin/clustering/results/${jobId}`);
+}
+export function acceptClusterProposals(proposals: Array<{ label: string; asset_ids: string[] }>) {
+  return apiFetch<{ created_collections: number }>("/admin/clustering/accept", {
+    method: "POST",
+    body: JSON.stringify({ proposals }),
+  });
+}
+
+// --- Feature 4: Tag Vocabulary ---
+export function fetchTagVocabulary() {
+  return apiFetch<TagVocabularyEntry[]>("/tags/vocabulary");
+}
+export function createTagVocabularyEntry(payload: { tag: string; description?: string; clip_prompt: string; enabled?: boolean }) {
+  return apiFetch<TagVocabularyEntry>("/tags/vocabulary", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchTagSuggestions(assetId: string) {
+  return apiFetch<TagSuggestion[]>(`/tags/suggestions/asset/${assetId}`);
+}
+
+export function submitTagSuggestionAction(suggestionId: number, action: "accept" | "reject") {
+  return apiFetch<{ status: string }>("/tags/suggestions/action", {
+    method: "POST",
+    body: JSON.stringify({ suggestion_id: suggestionId, action }),
+  });
+}
+
+export function fetchTagProviders() {
+  return apiFetch<TagProvidersResponse>("/tags/providers");
+}
+
+export function preloadTagProviders() {
+  return apiFetch<TagProvidersResponse>("/tags/providers/preload", {
+    method: "POST",
+  });
+}
+
+export function rebuildTags(payload: {
+  scope?: "all" | "source" | "asset";
+  source_id?: string;
+  asset_id?: string;
+  provider?: "wd_vit_v3" | "deepghs_wd_embeddings" | "clip_vocab";
+  compare_mode?: boolean;
+}) {
+  return apiFetch<TagRebuildResponse>("/tags/rebuild", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchRelatedTags(tag: string, limit = 12) {
+  return apiFetch<RelatedTag[]>(`/tags/related?tag=${encodeURIComponent(tag)}&limit=${limit}`);
+}
+
+export function fetchPublicShare(id: string) {
+  return apiFetch<PublicShareResponse>(`/share/${id}`);
+}
+

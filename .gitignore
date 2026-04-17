@@ -44,3 +44,6 @@ Thumbs.db
 *.log
 *.sqlite
 *.db
+.pytest_cache/
+backend/pytest-cache-files-*/
+infra/docker-compose.override.yml

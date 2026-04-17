@@ -7,7 +7,7 @@ from sqlalchemy import Float, Integer, and_, case, cast, desc, func, literal, or
 from sqlalchemy.orm import Session, aliased, selectinload
 
 from media_indexer_backend.models.enums import MatchType, MediaType, ReviewStatus
-from media_indexer_backend.models.tables import Asset, AssetAnnotation, AssetMetadata, AssetSearch, AssetSimilarity, AssetTag, SimilarityLink, User
+from media_indexer_backend.models.tables import Asset, AssetAnnotation, AssetMetadata, AssetSearch, AssetSimilarity, AssetTag, SimilarityLink, TagSuggestion, User
 from media_indexer_backend.schemas.asset import (
     AssetAnnotationRead,
     AssetBrowseItem,
@@ -64,6 +64,9 @@ def _annotation_for_asset(asset: Asset, user_id: UUID | None) -> AssetAnnotation
 
 
 def _is_workflow_export_available(asset: Asset) -> bool:
+    # Visual workflow extracted from image (Tesseract OCR pipeline)
+    if asset.visual_workflow_json:
+        return True
     if not asset.metadata_record:
         return False
     normalized = asset.metadata_record.normalized_json or {}
@@ -101,6 +104,10 @@ def _asset_summary(asset: Asset, user_id: UUID | None = None) -> AssetSummary:
         deepzoom_url=None,
         tags=sorted(tag.tag for tag in asset.tags),
         normalized_metadata=normalized,
+        caption=normalized.get("caption") if isinstance(normalized.get("caption"), str) else None,
+        caption_source=normalized.get("caption_source") if isinstance(normalized.get("caption_source"), str) else None,
+        ocr_text=normalized.get("ocr_text") if isinstance(normalized.get("ocr_text"), str) else None,
+        ocr_confidence=float(normalized["ocr_confidence"]) if isinstance(normalized.get("ocr_confidence"), (float, int)) else None,
         annotation=_annotation_for_asset(asset, user_id),
         workflow_export_available=_is_workflow_export_available(asset),
     )
@@ -130,6 +137,8 @@ def asset_browse_item(asset: Asset, user_id: UUID | None = None) -> AssetBrowseI
         prompt_excerpt=prompt_excerpt(normalized.get("prompt") if isinstance(normalized.get("prompt"), str) else None),
         prompt_tags=tags,
         prompt_tag_string=prompt_tag_string(tags),
+        caption=normalized.get("caption") if isinstance(normalized.get("caption"), str) else None,
+        ocr_text=normalized.get("ocr_text") if isinstance(normalized.get("ocr_text"), str) else None,
         annotation=_annotation_for_asset(asset, user_id),
         workflow_export_available=workflow_available,
     )
@@ -163,6 +172,9 @@ def get_asset_detail(session: Session, asset_id: UUID, current_user: User | None
         raw_metadata=raw_metadata,
         source_name=asset.source.name,
         workflow_export_url=f"/assets/{asset.id}/workflow/download" if summary.workflow_export_available else None,
+        visual_workflow_json=asset.visual_workflow_json,
+        visual_workflow_confidence=asset.visual_workflow_confidence,
+        visual_workflow_updated_at=asset.visual_workflow_updated_at,
     )
 
 
@@ -171,6 +183,8 @@ def _apply_search_filters(
     *,
     q: str | None,
     media_type: str | None,
+    caption: str | None,
+    ocr_text: str | None,
     camera_make: str | None,
     camera_model: str | None,
     year: int | None,
@@ -181,6 +195,7 @@ def _apply_search_filters(
     duration_min: float | None,
     duration_max: float | None,
     tags: list[str],
+    auto_tags: list[str] | None,
     exclude_tags: list[str] | None,
     min_rating: int | None,
     review_status: ReviewStatus | None,
@@ -193,6 +208,10 @@ def _apply_search_filters(
 
     if media_type:
         conditions.append(Asset.media_type == media_type)
+    if caption:
+        conditions.append(func.lower(normalized["caption"].astext).contains(caption.lower()))
+    if ocr_text:
+        conditions.append(func.lower(normalized["ocr_text"].astext).contains(ocr_text.lower()))
     if camera_make:
         conditions.append(func.lower(normalized["camera_make"].astext) == camera_make.lower())
     if camera_model:
@@ -220,6 +239,10 @@ def _apply_search_filters(
     for tag in [tag.strip().lower() for tag in tags if tag.strip()]:
         subquery = select(AssetTag.asset_id).where(AssetTag.tag == tag)
         conditions.append(Asset.id.in_(subquery))
+    if auto_tags:
+        for tag in [tag.strip().lower() for tag in auto_tags if tag.strip()]:
+            subquery = select(TagSuggestion.asset_id).where(TagSuggestion.status == "accepted", TagSuggestion.tag == tag)
+            conditions.append(Asset.id.in_(subquery))
     if exclude_tags:
         for tag in [tag.strip().lower() for tag in exclude_tags if tag.strip()]:
             subquery = select(AssetTag.asset_id).where(AssetTag.tag == tag)
@@ -251,6 +274,8 @@ def search_assets(
     *,
     q: str | None,
     media_type: str | None,
+    caption: str | None,
+    ocr_text: str | None,
     camera_make: str | None,
     camera_model: str | None,
     year: int | None,
@@ -261,13 +286,14 @@ def search_assets(
     duration_min: float | None,
     duration_max: float | None,
     tags: list[str],
+    auto_tags: list[str] | None = None,
     exclude_tags: list[str] | None = None,
-    min_rating: int | None,
-    review_status: ReviewStatus | None,
-    flagged: bool | None,
-    sort: str,
-    page: int,
-    page_size: int,
+    min_rating: int | None = None,
+    review_status: ReviewStatus | None = None,
+    flagged: bool | None = None,
+    sort: str = "relevance",
+    page: int = 1,
+    page_size: int = 24,
     current_user: User | None = None,
 ) -> AssetListResponse:
     allowed_source_ids = _allowed_source_ids(session, current_user)
@@ -290,6 +316,8 @@ def search_assets(
         base_query,
         q=q,
         media_type=media_type,
+        caption=caption,
+        ocr_text=ocr_text,
         camera_make=camera_make,
         camera_model=camera_model,
         year=year,
@@ -300,6 +328,7 @@ def search_assets(
         duration_min=duration_min,
         duration_max=duration_max,
         tags=tags,
+        auto_tags=auto_tags,
         exclude_tags=exclude_tags,
         min_rating=min_rating,
         review_status=review_status,
@@ -310,6 +339,8 @@ def search_assets(
         count_query,
         q=q,
         media_type=media_type,
+        caption=caption,
+        ocr_text=ocr_text,
         camera_make=camera_make,
         camera_model=camera_model,
         year=year,
@@ -320,6 +351,7 @@ def search_assets(
         duration_min=duration_min,
         duration_max=duration_max,
         tags=tags,
+        auto_tags=auto_tags,
         exclude_tags=exclude_tags,
         min_rating=min_rating,
         review_status=review_status,
@@ -351,6 +383,8 @@ def matching_asset_ids_for_search(
     *,
     q: str | None,
     media_type: str | None,
+    caption: str | None,
+    ocr_text: str | None,
     camera_make: str | None,
     camera_model: str | None,
     year: int | None,
@@ -361,6 +395,7 @@ def matching_asset_ids_for_search(
     duration_min: float | None,
     duration_max: float | None,
     tags: list[str],
+    auto_tags: list[str] | None = None,
     exclude_tags: list[str] | None = None,
     min_rating: int | None = None,
     review_status: ReviewStatus | None = None,
@@ -376,6 +411,8 @@ def matching_asset_ids_for_search(
         query,
         q=q,
         media_type=media_type,
+        caption=caption,
+        ocr_text=ocr_text,
         camera_make=camera_make,
         camera_model=camera_model,
         year=year,
@@ -386,6 +423,7 @@ def matching_asset_ids_for_search(
         duration_min=duration_min,
         duration_max=duration_max,
         tags=tags,
+        auto_tags=auto_tags,
         exclude_tags=exclude_tags,
         min_rating=min_rating,
         review_status=review_status,
@@ -487,6 +525,8 @@ def get_assets_for_tag(session: Session, tag: str, page: int, page_size: int, cu
         session,
         q=None,
         media_type=None,
+        caption=None,
+        ocr_text=None,
         camera_make=None,
         camera_model=None,
         year=None,
@@ -497,6 +537,7 @@ def get_assets_for_tag(session: Session, tag: str, page: int, page_size: int, cu
         duration_min=None,
         duration_max=None,
         tags=[tag],
+        auto_tags=None,
         exclude_tags=None,
         min_rating=None,
         review_status=None,
@@ -524,13 +565,14 @@ def get_similar_assets(session: Session, asset_id: UUID, match_type: MatchType, 
     if not related_ids:
         return []
 
+    _sim_allowed = _allowed_source_ids(session, current_user)
     assets = session.execute(
         select(Asset)
         .where(Asset.id.in_(related_ids))
         .options(selectinload(Asset.metadata_record), selectinload(Asset.tags), selectinload(Asset.annotations))
         .where(
-            Asset.source_id.in_(_allowed_source_ids(session, current_user))
-            if _allowed_source_ids(session, current_user) is not None
+            Asset.source_id.in_(_sim_allowed)
+            if _sim_allowed is not None
             else literal(True)
         )
     ).scalars().unique().all()

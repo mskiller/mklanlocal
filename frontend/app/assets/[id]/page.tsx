@@ -10,10 +10,12 @@ import { CollectionPickerModal } from "@/components/collection-picker-modal";
 import { ZoomableImageViewer } from "@/components/zoomable-image-viewer";
 import { useAuth } from "@/components/auth-provider";
 import { useToast } from "@/components/use-toast";
+import { TagSuggestionReview } from "@/components/tag-suggestion-review";
+import { ShareModal } from "@/components/share-modal";
 import { DetailTabs } from "@/components/DetailTabs";
 import { VisualWorkflowGraph } from "@/components/VisualWorkflowGraph";
 import { addAssetsToCollection, assetImageUrl, bulkAnnotateAssets, downloadWorkflow, downloadWorkflowFromFile, fetchAsset, fetchCollections, fetchSimilar, fetchSimilarByImage, mediaUrl } from "@/lib/api";
-import { metadataVersion, promptTagStringFromMetadata, promptTagsFromMetadata, stringMetadata } from "@/lib/asset-metadata";
+import { metadataVersion, numericMetadata, promptTagStringFromMetadata, promptTagsFromMetadata, stringMetadata } from "@/lib/asset-metadata";
 import { sourceFolderBrowseHref } from "@/lib/browse-links";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { TagFilterChip } from "@/components/tag-filter-chip";
@@ -39,15 +41,17 @@ export default function AssetDetailPage() {
   const [pendingTags, setPendingTags] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyExtracting, setBusyExtracting] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [nextAsset, nextDuplicates, nextSemantic, nextTagSimilar] = await Promise.all([
+        const [nextAsset, nextDuplicates, nextSemantic, nextTagSimilar, nextVisualMatches] = await Promise.all([
           fetchAsset(params.id),
           fetchSimilar(params.id, "duplicate", 6),
           fetchSimilar(params.id, "semantic", 6),
           fetchSimilar(params.id, "tag", 6),
+          fetchSimilarByImage(params.id, 6).catch(() => []),
         ]);
         setAsset(nextAsset);
         setRating(nextAsset.annotation?.rating ?? null);
@@ -57,6 +61,7 @@ export default function AssetDetailPage() {
         setDuplicates(nextDuplicates);
         setSemantic(nextSemantic);
         setTagSimilar(nextTagSimilar);
+        setVisualMatches(nextVisualMatches);
       } catch (nextError) {
         setError(nextError instanceof Error ? nextError.message : "Unable to load asset detail.");
       }
@@ -88,12 +93,28 @@ export default function AssetDetailPage() {
   const positivePrompt = asset ? stringMetadata(asset.normalized_metadata["prompt"]) : null;
   const negativePrompt = asset ? stringMetadata(asset.normalized_metadata["negative_prompt"]) : null;
   const workflowText = asset ? stringMetadata(asset.normalized_metadata["workflow_text"]) : null;
+  const caption = asset?.caption ?? stringMetadata(asset?.normalized_metadata?.["caption"]);
+  const ocrText = asset?.ocr_text ?? stringMetadata(asset?.normalized_metadata?.["ocr_text"]);
+  const gpsLatitude = asset ? numericMetadata(asset.normalized_metadata["gps_latitude"]) : null;
+  const gpsLongitude = asset ? numericMetadata(asset.normalized_metadata["gps_longitude"]) : null;
   const browseHref = asset ? sourceFolderBrowseHref(asset.source_id, asset.relative_path) : "/sources";
   const summaryEntries = asset
     ? Object.entries(asset.normalized_metadata).filter(
-        ([key]) => !["prompt", "negative_prompt", "workflow_text", "prompt_tags"].includes(key)
+        ([key]) => !["prompt", "negative_prompt", "workflow_text", "prompt_tags", "caption", "caption_source", "ocr_text", "ocr_confidence"].includes(key)
       )
     : [];
+  const mapBounds =
+    gpsLatitude !== null && gpsLongitude !== null
+      ? `${gpsLongitude - 0.02}%2C${gpsLatitude - 0.02}%2C${gpsLongitude + 0.02}%2C${gpsLatitude + 0.02}`
+      : null;
+  const mapEmbedUrl =
+    gpsLatitude !== null && gpsLongitude !== null && mapBounds
+      ? `https://www.openstreetmap.org/export/embed.html?bbox=${mapBounds}&layer=mapnik&marker=${gpsLatitude}%2C${gpsLongitude}`
+      : null;
+  const mapExternalUrl =
+    gpsLatitude !== null && gpsLongitude !== null
+      ? `https://www.openstreetmap.org/?mlat=${gpsLatitude}&mlon=${gpsLongitude}#map=14/${gpsLatitude}/${gpsLongitude}`
+      : null;
 
   const handleVisualExtract = async () => {
     if (!asset) return;
@@ -101,8 +122,12 @@ export default function AssetDetailPage() {
     try {
       const response = await fetch(`/api/assets/${asset.id}/workflow/visual-extract`, { method: "POST" });
       if (!response.ok) throw new Error("Processing failed.");
-      const nextAsset = await fetchAsset(asset.id);
+      const [nextAsset, nextVisualMatches] = await Promise.all([
+        fetchAsset(asset.id),
+        fetchSimilarByImage(asset.id, 6).catch(() => []),
+      ]);
       setAsset(nextAsset);
+      setVisualMatches(nextVisualMatches);
       push("Visual extraction complete!", "success");
     } catch {
       push("Failed to process visual workflow.", "error");
@@ -118,7 +143,7 @@ export default function AssetDetailPage() {
     { id: "similar", label: "Related", icon: "🔗" },
   ];
 
-  if (asset?.normalized_metadata["gps_latitude"]) {
+  if (gpsLatitude !== null && gpsLongitude !== null) {
     tabs.push({ id: "location", label: "Location", icon: "📍" });
   }
 
@@ -173,14 +198,26 @@ export default function AssetDetailPage() {
             </div>
 
             {user?.capabilities.can_manage_collections && asset ? (
-              <button type="button" className="button ghost-button small-button" onClick={() => setCollectionOpen(true)}>
-                Add to Collection
-              </button>
+              <div className="row" style={{ gap: "0.5rem" }}>
+                <button type="button" className="button ghost-button small-button" onClick={() => setCollectionOpen(true)}>
+                  Add to Collection
+                </button>
+                <button type="button" className="button ghost-button small-button" onClick={() => setShareOpen(true)}>
+                  Share
+                </button>
+              </div>
             ) : null}
           </div>
         ) : null
       }
     >
+      {shareOpen && asset && (
+        <ShareModal 
+          targetId={asset.id} 
+          targetType="asset" 
+          onClose={() => setShareOpen(false)} 
+        />
+      )}
       <main className="asset-detail-container">
         {error && <div className="error-banner">{error}</div>}
 
@@ -230,6 +267,8 @@ export default function AssetDetailPage() {
                           </button>
                         ))}
                       </div>
+
+                      {asset && <TagSuggestionReview assetId={asset.id} onChanged={async () => setAsset(await fetchAsset(asset.id))} />}
                     </div>
                   </article>
                 </div>
@@ -263,6 +302,24 @@ export default function AssetDetailPage() {
                       <button type="button" className="button subtle-button small-button" onClick={async () => { await copyTextToClipboard(negativePrompt); push("Copied negative prompt!", "success"); }}>
                         Copy Negative Prompt
                       </button>
+                    </article>
+                  )}
+
+                  {caption && (
+                    <article className="panel stack">
+                      <p className="eyebrow">Caption</p>
+                      <div className="prompt-content selectable">{caption}</div>
+                      {asset?.caption_source ? <p className="subdued">Source: {asset.caption_source}</p> : null}
+                    </article>
+                  )}
+
+                  {ocrText && (
+                    <article className="panel stack">
+                      <p className="eyebrow">OCR Text</p>
+                      <div className="prompt-content subdued selectable">{ocrText}</div>
+                      {typeof asset?.ocr_confidence === "number" ? (
+                        <p className="subdued">Confidence: {(asset.ocr_confidence * 100).toFixed(0)}%</p>
+                      ) : null}
                     </article>
                   )}
 
@@ -352,7 +409,7 @@ export default function AssetDetailPage() {
                 </div>
               )}
 
-              {activeTab === "location" && asset?.normalized_metadata["gps_latitude"] && (
+              {activeTab === "location" && gpsLatitude !== null && gpsLongitude !== null && (
                 <div className="location-tab stack">
                   <article className="panel stack">
                     <div>
@@ -360,20 +417,23 @@ export default function AssetDetailPage() {
                       <h2>GPS Coordinates</h2>
                     </div>
                     <div className="gps-map-container" style={{ borderRadius: "16px", overflow: "hidden", border: "1px solid var(--border)" }}>
-                      <iframe
-                        width="100%"
-                        height="480"
-                        style={{ border: 0, filter: "invert(90%) hue-rotate(180deg)" }}
-                        loading="lazy"
-                        allowFullScreen
-                        src={`https://www.google.com/maps/embed/v1/view?key=YOUR_API_KEY_HERE&center=${asset?.normalized_metadata["gps_latitude"]},${asset?.normalized_metadata["gps_longitude"]}&zoom=14&maptype=roadmap`}
-                      ></iframe>
+                      {mapEmbedUrl ? (
+                        <iframe
+                          width="100%"
+                          height="480"
+                          style={{ border: 0 }}
+                          loading="lazy"
+                          src={mapEmbedUrl}
+                        />
+                      ) : (
+                        <div className="empty-state">Map preview unavailable.</div>
+                      )}
                       <div style={{ padding: "0.85rem", background: "rgba(7, 16, 20, 0.44)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <span className="subdued">
-                          {String(asset?.normalized_metadata["gps_latitude"])}, {String(asset?.normalized_metadata["gps_longitude"])}
+                          {gpsLatitude}, {gpsLongitude}
                         </span>
-                        <a href={`https://www.google.com/maps/search/?api=1&query=${asset?.normalized_metadata["gps_latitude"]},${asset?.normalized_metadata["gps_longitude"]}`} target="_blank" rel="noopener noreferrer" className="button small-button subtle-button">
-                          View on Google Maps
+                        <a href={mapExternalUrl ?? undefined} target="_blank" rel="noopener noreferrer" className="button small-button subtle-button">
+                          View on OpenStreetMap
                         </a>
                       </div>
                     </div>

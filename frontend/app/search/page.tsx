@@ -179,9 +179,12 @@ function SearchPageContent() {
   };
 
   const activeTags = parseTagList(filters.tags);
+  const activeAutoTags = parseTagList(filters.auto_tags);
   const activeFilters = [
     filters.q ? `Query: ${filters.q}` : null,
     filters.media_type ? `Type: ${filters.media_type}` : null,
+    filters.caption ? `Caption: ${filters.caption}` : null,
+    filters.ocr_text ? `OCR: ${filters.ocr_text}` : null,
     filters.camera_make ? `Make: ${filters.camera_make}` : null,
     filters.camera_model ? `Model: ${filters.camera_model}` : null,
     filters.year ? `Year: ${filters.year}` : null,
@@ -241,6 +244,8 @@ function SearchPageContent() {
               await addSearchResultsToCollection(collectionId, {
                 q: filters.q || undefined,
                 media_type: filters.media_type || undefined,
+                caption: filters.caption || undefined,
+                ocr_text: filters.ocr_text || undefined,
                 camera_make: filters.camera_make || undefined,
                 camera_model: filters.camera_model || undefined,
                 year: filters.year ? Number(filters.year) : undefined,
@@ -251,6 +256,7 @@ function SearchPageContent() {
                 duration_min: filters.duration_min ? Number(filters.duration_min) : undefined,
                 duration_max: filters.duration_max ? Number(filters.duration_max) : undefined,
                 tags: parseTagList(filters.tags),
+                auto_tags: parseTagList(filters.auto_tags),
               });
             }
             setCollectionOpen(false);
@@ -272,7 +278,7 @@ function SearchPageContent() {
             subtitle="Refine the index"
           >
             <FilterSidebar value={filters} onChange={setFilters} tagSuggestions={tagSuggestions} />
-            <div className="search-sidebar-actions" style={{ marginTop: "0.5rem" }}>
+            <div className="search-sidebar-actions search-mobile-sheet-actions">
               <button className="button ghost-button small-button" type="button" onClick={resetFilters}>
                 Reset
               </button>
@@ -363,19 +369,19 @@ function SearchPageContent() {
                 Select All Loaded
               </button>
               <button className="button ghost-button small-button search-filters-button" type="button" onClick={() => setFiltersOpen(true)}>
-                Filters{activeFilters.length || activeTags.length ? ` (${activeFilters.length + activeTags.length})` : ""}
+                Filters{activeFilters.length || activeTags.length || activeAutoTags.length ? ` (${activeFilters.length + activeTags.length + activeAutoTags.length})` : ""}
               </button>
               <button className="button small-button desktop-filter-apply" type="button" onClick={applyFilters}>
                 Apply Filters
               </button>
             </div>
           </div>
-          {activeFilters.length || activeTags.length ? (
+          {activeFilters.length || activeTags.length || activeAutoTags.length ? (
             <section className="panel stack">
               <div className="row-between">
                 <div>
                   <p className="eyebrow">Active Filters</p>
-                  <h2>{activeFilters.length + activeTags.length} active</h2>
+                  <h2>{activeFilters.length + activeTags.length + activeAutoTags.length} active</h2>
                 </div>
                 <button className="button ghost-button small-button" type="button" onClick={resetFilters}>
                   Clear All
@@ -399,6 +405,20 @@ function SearchPageContent() {
                     }}
                   >
                     {tag} x
+                  </button>
+                ))}
+                {activeAutoTags.map((tag) => (
+                  <button
+                    key={`auto-${tag}`}
+                    type="button"
+                    className="chip buttonless"
+                    onClick={() => {
+                      const nextFilters = { ...filters, auto_tags: removeTagFilter(filters.auto_tags, tag) };
+                      setFilters(nextFilters);
+                      pushFilters(nextFilters);
+                    }}
+                  >
+                    auto:{tag} x
                   </button>
                 ))}
               </div>

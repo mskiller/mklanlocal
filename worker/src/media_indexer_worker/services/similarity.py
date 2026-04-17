@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from media_indexer_backend.core.config import get_settings
 from media_indexer_backend.models.enums import MatchType
 from media_indexer_backend.models.tables import AssetSimilarity, SimilarityLink
+from media_indexer_backend.services.clip_embeddings import ClipEmbeddingService
 from media_indexer_backend.services.metadata import canonical_pair, hamming_distance
 from media_indexer_backend.services.tag_similarity_service import rebuild_tag_similarity_for_asset
 
@@ -23,63 +24,6 @@ try:
     import cv2
 except ImportError:  # pragma: no cover - dependency issue fallback
     cv2 = None
-
-
-class ClipEmbeddingService:
-    def __init__(self) -> None:
-        self.settings = get_settings()
-        self._processor = None
-        self._model = None
-        self._torch = None
-        self._load_failed = False
-
-    def _load(self) -> bool:
-        if not self.settings.clip_enabled:
-            return False
-        if self._load_failed:
-            return False
-        if self._model is not None and self._processor is not None and self._torch is not None:
-            return True
-        try:
-            import torch
-            from transformers import CLIPModel, CLIPProcessor
-
-            self._torch = torch
-            self._processor = CLIPProcessor.from_pretrained(self.settings.clip_model_id)
-            self._model = CLIPModel.from_pretrained(self.settings.clip_model_id).to(self.settings.clip_device)
-            self._model.eval()
-            return True
-        except Exception as exc:  # noqa: BLE001
-            self._load_failed = True
-            logger.warning("clip model unavailable: %s", exc, extra={"error": str(exc)}, exc_info=True)
-            return False
-
-    def embed_image(self, path: Path) -> list[float] | None:
-        if not self._load():
-            return None
-        assert self._processor is not None
-        assert self._model is not None
-        assert self._torch is not None
-        try:
-            with Image.open(path) as image:
-                image = image.convert("RGB")
-                inputs = self._processor(images=image, return_tensors="pt")
-                inputs = {key: value.to(self.settings.clip_device) for key, value in inputs.items()}
-                with self._torch.no_grad():
-                    output = self._model.get_image_features(**inputs)
-                    if isinstance(output, self._torch.Tensor):
-                        embedding = output
-                    elif hasattr(output, "image_embeds"):
-                        embedding = output.image_embeds
-                    elif hasattr(output, "pooler_output"):
-                        embedding = output.pooler_output
-                    else:
-                        raise AttributeError(f"Cannot extract embedding from {type(output).__name__}: {list(vars(output).keys())}")
-                    embedding = embedding / embedding.norm(dim=-1, keepdim=True)
-                return embedding[0].detach().cpu().numpy().astype(np.float32).tolist()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("clip embedding failed: %s", exc, extra={"path": str(path), "error": str(exc)}, exc_info=True)
-            return None
 
 
 class SimilarityService:

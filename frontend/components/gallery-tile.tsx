@@ -35,7 +35,7 @@ export function GalleryTile({
   onImageLoad,
   workflowAvailable,
 }: {
-  imageSrc: string | null;
+  imageSrc: string | null | undefined;
   blurHash?: string | null;
   alt: string;
   title: string;

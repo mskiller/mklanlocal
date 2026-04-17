@@ -21,9 +21,9 @@ export interface ExplorerItem {
   promptExcerpt?: string | null;
   promptTags: string[];
   statusBadge?: string | null;
-  previewSrc: string | null;
-  contentSrc: string | null;
-  deepzoomUrl?: string | null;
+  previewSrc: string | null | undefined;
+  contentSrc: string | null | undefined;
+  deepzoomUrl?: string | null | undefined;
   detailHref?: string | null;
   similarHref?: string | null;
   sourceContext?: string | null;
@@ -296,7 +296,7 @@ export function ImageExplorerOverlay({
                     deepzoomUrl: currentItem.deepzoomUrl ?? null,
                   }}
                   alt={currentItem.title}
-                  defaultMode="auto"
+                  defaultMode="fit"
                   navigatorVisible={navigatorVisible}
                   onScalePercentChange={setScalePercent}
                 />

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from uuid import UUID
+from datetime import datetime, timezone
 
 import json
 
@@ -32,6 +33,8 @@ router = APIRouter(tags=["assets"])
 def get_assets(
     q: str | None = None,
     media_type: str | None = None,
+    caption: str | None = None,
+    ocr_text: str | None = None,
     camera_make: str | None = None,
     camera_model: str | None = None,
     year: int | None = None,
@@ -42,6 +45,7 @@ def get_assets(
     duration_min: float | None = None,
     duration_max: float | None = None,
     tags: str | None = None,
+    auto_tags: str | None = None,
     exclude_tags: str | None = None,
     min_rating: int | None = Query(default=None, ge=1, le=5),
     review_status: ReviewStatus | None = None,
@@ -56,6 +60,8 @@ def get_assets(
         session,
         q=q,
         media_type=media_type,
+        caption=caption,
+        ocr_text=ocr_text,
         camera_make=camera_make,
         camera_model=camera_model,
         year=year,
@@ -66,6 +72,7 @@ def get_assets(
         duration_min=duration_min,
         duration_max=duration_max,
         tags=[value.strip() for value in (tags or "").split(",") if value.strip()],
+        auto_tags=[value.strip() for value in (auto_tags or "").split(",") if value.strip()],
         exclude_tags=[value.strip() for value in (exclude_tags or "").split(",") if value.strip()],
         min_rating=min_rating,
         review_status=review_status,
@@ -316,15 +323,12 @@ def trigger_visual_workflow_extraction(
     result = workflow_extractor.extract_visual_workflow(original_path)
     
     # 2. Persist to asset
-    asset.visual_workflow_json = result.get("nodes", []) + result.get("edges", []) # Combined for now
-    # Wait, better structured for React Flow:
-    # { "nodes": [...], "edges": [...] }
     asset.visual_workflow_json = {
         "nodes": result.get("nodes", []),
         "edges": result.get("edges", [])
     }
     asset.visual_workflow_confidence = result.get("confidence", 0)
-    asset.visual_workflow_updated_at = sa.func.now()
+    asset.visual_workflow_updated_at = datetime.now(tz=timezone.utc)
     
     session.commit()
     

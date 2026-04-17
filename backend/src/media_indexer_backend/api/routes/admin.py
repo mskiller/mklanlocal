@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session
 from media_indexer_backend.api.dependencies import get_session, require_admin
 from media_indexer_backend.core.config import get_settings
 from media_indexer_backend.core.rate_limit import enforce_rate_limit
+from media_indexer_backend.db.session import SessionLocal
+import uuid
 from media_indexer_backend.models.enums import ScanStatus
-from media_indexer_backend.models.tables import ScanJob, User
+from media_indexer_backend.models.tables import ScanJob, User, Collection, CollectionAsset
 from media_indexer_backend.schemas.admin import (
     AuditLogRead,
     GroupCreateRequest,
@@ -25,6 +27,8 @@ from media_indexer_backend.schemas.admin import (
 )
 from media_indexer_backend.schemas.maintenance import ResetRequest, ResetResponse
 from media_indexer_backend.schemas.settings import AdminSettings, AdminSettingsUpdateRequest, TagSimilarityRebuildResponse
+from media_indexer_backend.schemas.clustering import ClusterProposal, ClusteringRequest, ClusteringAcceptAllRequest
+from media_indexer_backend.services.clustering_service import run_clustering
 from media_indexer_backend.services.audit import record_audit_event
 from media_indexer_backend.services.backup_service import create_backup_archive, restore_backup_sql, validate_backup_archive
 from media_indexer_backend.services.maintenance_service import purge_deepzoom_tiles, reset_application_data
@@ -47,6 +51,9 @@ from media_indexer_backend.services.user_service import (
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+# In-memory storage for clustering results for simplicity
+_clustering_results: dict[str, list[ClusterProposal] | str] = {}
 
 
 def _assert_no_active_scans(session: Session) -> None:
@@ -358,3 +365,75 @@ def post_rebuild_tag_similarity(
     )
     session.commit()
     return TagSimilarityRebuildResponse(rebuilt_assets=rebuilt_assets, rebuilt_links=rebuilt_links)
+
+
+@router.post("/clustering/suggest")
+async def post_clustering_suggest(
+    payload: ClusteringRequest,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_admin),
+) -> dict[str, str]:
+    job_id = str(uuid.uuid4())
+    _clustering_results[job_id] = "processing"
+    
+    def task():
+        try:
+            with SessionLocal() as background_session:
+                results = run_clustering(background_session, k=payload.k, min_size=payload.min_size)
+            _clustering_results[job_id] = results
+        except Exception as e:
+            _clustering_results[job_id] = f"error: {str(e)}"
+            
+    background_tasks.add_task(task)
+    return {"job_id": job_id}
+
+
+@router.get("/clustering/results/{job_id}", response_model=list[ClusterProposal] | dict)
+def get_clustering_results(
+    job_id: str,
+    current_user: User = Depends(require_admin),
+) -> list[ClusterProposal] | dict:
+    result = _clustering_results.get(job_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if result == "processing":
+        return {"status": "processing"}
+    if isinstance(result, str) and result.startswith("error"):
+        return {"status": "error", "message": result}
+    return result
+
+
+@router.post("/clustering/accept")
+def post_clustering_accept(
+    payload: ClusteringAcceptAllRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_admin),
+) -> dict[str, int]:
+    created_count = 0
+    from datetime import datetime, timezone
+    
+    for prop in payload.proposals:
+        # 1. Create Collection
+        coll = Collection(
+            name=prop.label,
+            created_by=current_user.id,
+            created_at=datetime.now(tz=timezone.utc),
+            updated_at=datetime.now(tz=timezone.utc)
+        )
+        session.add(coll)
+        session.flush() # get id
+        
+        # 2. Add Assets
+        for asset_id in prop.asset_ids:
+            link = CollectionAsset(
+                collection_id=coll.id,
+                asset_id=asset_id,
+                added_by=current_user.id,
+                created_at=datetime.now(tz=timezone.utc)
+            )
+            session.add(link)
+        created_count += 1
+        
+    session.commit()
+    return {"created_collections": created_count}

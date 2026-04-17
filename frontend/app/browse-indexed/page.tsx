@@ -258,9 +258,9 @@ export default function BrowseIndexedPage() {
         subtitle: [item.source_name, item.generator].filter(Boolean).join(" · ") || undefined,
         promptExcerpt: item.prompt_excerpt,
         promptTags: item.prompt_tags,
-        previewSrc: mediaUrl(item.preview_url),
-        contentSrc: mediaUrl(item.content_url),
-        deepzoomUrl: mediaUrl(item.deepzoom_url),
+        previewSrc: mediaUrl(item.preview_url) ?? null,
+        contentSrc: mediaUrl(item.content_url) ?? null,
+        deepzoomUrl: mediaUrl(item.deepzoom_url) ?? null,
         detailHref: `/assets/${item.id}`,
         similarHref: `/assets/${item.id}/similar`,
         sourceContext: item.relative_path,
@@ -616,7 +616,7 @@ export default function BrowseIndexedPage() {
                     className="gallery-tile-justified"
                     tileStyle={{ height: "100%" }}
                     imageButtonStyle={{ height: "100%", aspectRatio: "auto" }}
-                    imageSrc={mediaUrl(item.preview_url)}
+                    imageSrc={mediaUrl(item.preview_url) ?? null}
                     blurHash={item.blur_hash}
                     alt={item.filename}
                     title={item.filename}

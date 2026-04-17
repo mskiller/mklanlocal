@@ -3,6 +3,29 @@
 All notable changes to MKLanLocal are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] — 2026-04-17
+
+### Added
+
+- **Local AI enrichment pipeline** — Added a shared image enrichment service covering local WD tagging (`SmilingWolf/wd-vit-tagger-v3` primary, `deepghs/wd14_tagger_with_embeddings` fallback and related tags), CLIP vocabulary tagging, BLIP captions, and Tesseract OCR.
+- **Tagging admin APIs and UI** — Added provider status, model warm-up, rebuild, and related-tag explorer flows, plus richer suggestion metadata (`tag_group`, `source_model`, rank, threshold, raw score).
+- **Timeline view** — Added year, month, day, and asset timeline endpoints plus a new `/timeline` page in the main navigation.
+- **Public share links** — Added share creation, public share pages, and share-scoped preview and download endpoints for assets and collections.
+- **Auto-collection suggestions** — Added CLIP clustering endpoints, admin polling UI, and accept-to-collection workflow.
+- **Search enrichment filters** — Added caption, OCR text, and accepted auto-tag filters to search, collection-add-from-search, and frontend filter controls.
+
+### Changed
+
+- **Worker scan pipeline** — Image scans now run similarity refresh and enrichment through a shared backend service so tags, captions, OCR, and search documents stay in sync.
+- **Asset detail experience** — Asset pages now show caption and OCR content alongside grouped AI tag suggestions and related actions.
+- **README and deploy expectations** — Documented the v1.9 feature set and clarified that optional local AI features download additional model assets on first use.
+
+### Fixed
+
+- **Explorer initial zoom** — The image explorer overlay now opens in fit-to-view mode instead of defaulting to an over-zoomed desktop view.
+- **Mobile filter actions** — The mobile search bottom sheet now keeps `Apply Filters` and `Reset` reachable with a sticky footer action bar.
+- **Public share media delivery** — Shared assets now use public share-scoped preview and content URLs instead of protected authenticated asset endpoints.
+
 ## [1.6.0] — 2026-04-14
 
 ### Fixed

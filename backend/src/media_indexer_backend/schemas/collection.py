@@ -25,6 +25,8 @@ class CollectionAssetAddRequest(BaseModel):
 class CollectionSearchAddRequest(BaseModel):
     q: str | None = None
     media_type: str | None = None
+    caption: str | None = None
+    ocr_text: str | None = None
     camera_make: str | None = None
     camera_model: str | None = None
     year: int | None = None
@@ -35,6 +37,7 @@ class CollectionSearchAddRequest(BaseModel):
     duration_min: float | None = None
     duration_max: float | None = None
     tags: list[str] = []
+    auto_tags: list[str] = []
 
 
 class CollectionSummary(BaseModel):

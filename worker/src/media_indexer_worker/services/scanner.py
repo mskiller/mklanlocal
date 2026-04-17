@@ -13,6 +13,7 @@ from media_indexer_backend.db.session import SessionLocal
 from media_indexer_backend.models.enums import MediaType, ScanStatus, SourceStatus
 from media_indexer_backend.models.tables import Asset, AssetMetadata, AssetSearch, AssetSimilarity, AssetTag, ScanJob, Source
 from media_indexer_backend.services.audit import record_audit_event
+from media_indexer_backend.services.image_enrichment import get_image_enrichment_service
 from media_indexer_backend.services.metadata import (
     build_search_text,
     build_tags,
@@ -40,6 +41,7 @@ class ScanWorker:
         self.previews = PreviewGenerator()
         self.similarity = SimilarityService()
         self.nsfw_detector = NsfwDetectorService()
+        self.image_enrichment = get_image_enrichment_service()
 
     def run_forever(self) -> None:
         logger.info("worker loop started")
@@ -372,6 +374,24 @@ class ScanWorker:
             self.similarity.refresh(session, asset.id, path)
         elif media_type == MediaType.IMAGE:
             self.similarity.refresh_tag_links(session, asset.id)
+
+        needs_image_enrichment = (
+            media_type == MediaType.IMAGE
+            and (
+                content_changed
+                or existing is None
+                or needs_similarity_refresh
+                or "caption" not in normalized
+                or "caption_source" not in normalized
+                or "ocr_text" not in normalized
+                or "ocr_confidence" not in normalized
+            )
+        )
+        if needs_image_enrichment:
+            job.message = f"Enriching image: {relative_path}"
+            session.commit()
+            self.image_enrichment.enrich_asset(session, asset, path)
+
         session.commit()
 
     def _delete_missing_assets(

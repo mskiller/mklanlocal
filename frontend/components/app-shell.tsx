@@ -94,6 +94,7 @@ export function AppShell({
     { href: "/browse-indexed", label: "Browse Indexed" },
     { href: "/search", label: "Search" },
     { href: "/collections", label: "Collections" },
+    { href: "/timeline", label: "Timeline" },
     ...(user.capabilities.can_upload_assets ? [{ href: "/upload", label: "Upload" }] : []),
     { href: "/scan-jobs", label: "Scan Jobs" },
     ...(user.capabilities.can_view_admin ? [{ href: "/admin", label: "Admin" }] : []),
@@ -105,6 +106,7 @@ export function AppShell({
     { href: "/browse-indexed", label: "Indexed" },
     { href: "/search", label: "Search" },
     { href: "/collections", label: "Collections" },
+    { href: "/timeline", label: "Timeline" },
   ];
 
   const isActive = (href: string) => {

@@ -30,6 +30,14 @@ export function FilterSidebar({
         </select>
       </label>
       <label className="field">
+        <span>Caption</span>
+        <input value={value.caption} onChange={(event) => update("caption", event.target.value)} placeholder="caption text" />
+      </label>
+      <label className="field">
+        <span>OCR Text</span>
+        <input value={value.ocr_text} onChange={(event) => update("ocr_text", event.target.value)} placeholder="text seen in image" />
+      </label>
+      <label className="field">
         <span>Camera Make</span>
         <input value={value.camera_make} onChange={(event) => update("camera_make", event.target.value)} />
       </label>
@@ -105,6 +113,10 @@ export function FilterSidebar({
       <label className="field">
         <span>Tags</span>
         <input value={value.tags} onChange={(event) => update("tags", event.target.value)} placeholder="camera:canon,travel" />
+      </label>
+      <label className="field">
+        <span>Accepted Auto Tags</span>
+        <input value={value.auto_tags} onChange={(event) => update("auto_tags", event.target.value)} placeholder="wd tag,auto tag" />
       </label>
       {activeTags.length ? (
         <div className="chip-row">

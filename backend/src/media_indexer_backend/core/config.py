@@ -47,6 +47,24 @@ class Settings(BaseSettings):
     clip_device: str = "cpu"
     nsfw_detector_enabled: bool = True
     nsfw_model_id: str = "Falconsai/nsfw_image_detection"
+    model_cache_dir: str = "/workspace/storage/models"
+    image_tagging_enabled: bool = True
+    image_tagging_primary_provider: str = "wd_vit_v3"
+    image_tagging_fallback_provider: str = "deepghs_wd_embeddings"
+    wd_vit_model_id: str = "SmilingWolf/wd-vit-tagger-v3"
+    deepghs_embedding_repo_id: str = "deepghs/wd14_tagger_with_embeddings"
+    deepghs_embedding_subfolder: str = "SmilingWolf/wd-vit-tagger-v3"
+    clip_vocab_threshold: float = 0.2
+    tag_suggestion_general_threshold: float = 0.35
+    tag_suggestion_meta_threshold: float = 0.45
+    tag_suggestion_character_threshold: float = 0.6
+    tag_suggestion_copyright_threshold: float = 0.6
+    tag_suggestion_max_pending: int = 30
+    caption_enabled: bool = True
+    caption_model_id: str = "Salesforce/blip-image-captioning-base"
+    caption_device: str = "auto"
+    ocr_enabled: bool = True
+    ocr_max_characters: int = 6000
 
     @property
     def allowed_source_root_paths(self) -> list[Path]:
@@ -59,6 +77,10 @@ class Settings(BaseSettings):
     @property
     def preview_root_path(self) -> Path:
         return Path(self.preview_root).resolve(strict=False)
+
+    @property
+    def model_cache_root_path(self) -> Path:
+        return Path(self.model_cache_dir).resolve(strict=False)
 
     @model_validator(mode="after")
     def reject_insecure_defaults(self) -> "Settings":

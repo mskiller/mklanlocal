@@ -4,7 +4,8 @@ import uuid
 from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, String, Text, UniqueConstraint
+import secrets
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Enum as SqlEnum
@@ -119,8 +120,8 @@ class Asset(Base):
     blur_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     
     # Visual Workflow Extraction (v1.8 Expansion)
-    visual_workflow_json: Mapped[dict | list | None] = mapped_column(postgresql.JSONB, nullable=True)
-    visual_workflow_confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    visual_workflow_json: Mapped[dict | list | None] = mapped_column(JSONB, nullable=True)
+    visual_workflow_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     visual_workflow_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     source: Mapped[Source] = relationship(back_populates="assets")
@@ -297,3 +298,45 @@ class AuditLog(Base):
     resource_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     details: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ShareLink(Base):
+    __tablename__ = "share_links"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: secrets.token_urlsafe(16))
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    target_type: Mapped[str] = mapped_column(String)
+    target_id: Mapped[str] = mapped_column(String)
+    label: Mapped[str | None] = mapped_column(String, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    allow_download: Mapped[bool] = mapped_column(Boolean, default=False)
+    view_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TagVocabularyEntry(Base):
+    __tablename__ = "tag_vocabulary"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tag: Mapped[str] = mapped_column(String, unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    clip_prompt: Mapped[str] = mapped_column(String)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+
+
+class TagSuggestion(Base):
+    __tablename__ = "tag_suggestions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    asset_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
+    tag: Mapped[str] = mapped_column(String, index=True)
+    tag_group: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float)
+    source_model: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    raw_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    threshold_used: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="pending")  # pending | accepted | rejected
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

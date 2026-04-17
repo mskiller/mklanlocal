@@ -26,14 +26,14 @@ Monitor all scan jobs in near real time: running, cancelled, and completed — w
 
 ---
 
-## What's new in v1.8
+## What's new in v1.9
 
-- **Visual Workflow Graph** — Each asset now exposes its generation workflow as an interactive node graph (`VisualWorkflowGraph`). Embedded ComfyUI / A1111 workflow data is parsed and rendered directly in the asset detail page.
-- **Workflow export** — Export the workflow of any asset as a ready-to-import JSON file.
-- **Improved asset detail page** — New tabbed layout (`DetailTabs`) cleanly separates metadata, workflow, and similar-images panels.
-- **Search & browse enhancements** — Toast notifications, improved bulk-action bar, and smoother gallery tile interactions.
-- **New DB migration (`0007_visual_workflow`)** — Adds the columns needed to store and query parsed workflow data.
-- **Worker extractors updated** — The scan worker now extracts and persists embedded workflow JSON from PNG and WebP files during indexing.
+- **Local AI enrichment pipeline** — Image scans now support `SmilingWolf/wd-vit-tagger-v3` as the primary local tagger, `deepghs/wd14_tagger_with_embeddings` for fallback and related-tag lookups, CLIP vocabulary post-tagging, BLIP captions, and Tesseract OCR.
+- **Timeline view** — Browse the indexed library by year, month, and day from a dedicated `Timeline` screen in the main navigation.
+- **Public share links** — Share individual assets or full collections through tokenized public links with optional downloads.
+- **Admin clustering suggestions** — Generate CLIP-based collection proposals from existing embeddings and accept them directly from the admin UI.
+- **Search and review upgrades** — Search now supports caption, OCR text, and accepted auto-tag filters; asset detail shows grouped AI suggestions plus caption/OCR metadata.
+- **Mobile and explorer polish** — The mobile search filter sheet keeps its action bar reachable, and the Explorer overlay opens images fit-to-view instead of over-zoomed.
 
 ---
 
@@ -43,10 +43,14 @@ Monitor all scan jobs in near real time: running, cancelled, and completed — w
 |---|---|
 | 📁 **Source management** | Mount any number of local folders as named sources |
 | 🔍 **Full-text + faceted search** | Filter by camera, year, dimensions, duration, tags, rating, review status |
+| 🗓️ **Timeline navigation** | Drill down through year, month, and day for photo-library style browsing |
 | 🔁 **Near-duplicate detection** | Perceptual hash (pHash) with configurable threshold |
 | 🧠 **Semantic similarity** | CLIP embeddings in pgvector — "find visually similar" on any image |
+| 🤖 **Local AI enrichment** | WD taggers, CLIP vocabulary tagging, BLIP captions, and OCR all run locally after initial model download |
 | ⚖️ **Side-by-side comparison** | Pixel-locked pan/zoom sync, overlay diff, metadata diff table |
 | 🗂️ **Collections** | Named groups; bulk add/remove from gallery or search |
+| 🪄 **Collection suggestions** | Generate proposed collections from existing CLIP embeddings in the Admin UI |
+| 🔗 **Public sharing** | Time-limited share links for assets or collections with optional download access |
 | ⭐ **Asset annotations** | Per-user rating, review status, curator notes, flagged toggle |
 | ✅ **Bulk curation** | Multi-select with right-click / long-press context menu |
 | 👥 **User management** | Admin / curator / guest roles; groups with fine-grained permissions |
@@ -65,6 +69,7 @@ Monitor all scan jobs in near real time: running, cancelled, and completed — w
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Compose plugin)
 - 4 GB RAM recommended for the worker (CLIP runs on CPU by default)
 - The CLIP model (~600 MB) downloads from HuggingFace on first start and is cached persistently
+- Optional local AI enrichment downloads additional Hugging Face assets (WD taggers, embedding pack, caption model) the first time those features are used
 
 ---
 
@@ -145,6 +150,8 @@ docker compose -f infra/docker-compose.yml up --build
 ```
 
 Then go to **Admin → Sources → Add Source**, enter the container path (e.g. `/data/sources/photos`), and click **Scan**.
+
+Tip: keep personal bind mounts in a local `infra/docker-compose.override.yml` instead of editing the tracked compose file directly.
 
 ---
 

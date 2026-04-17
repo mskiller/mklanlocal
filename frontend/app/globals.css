@@ -2236,7 +2236,7 @@ img {
   background: var(--bg-alt);
   border-top: 1px solid var(--border);
   border-radius: 20px 20px 0 0;
-  padding: 0.6rem 1.25rem 2rem;
+  padding: 0.6rem 1.25rem calc(1rem + env(safe-area-inset-bottom, 0px));
   max-height: 82vh;
   overflow-y: auto;
   transform: translateY(100%);
@@ -2254,6 +2254,16 @@ img {
   border-radius: 999px;
   background: rgba(115, 152, 164, 0.38);
   margin: 0 auto 1.1rem;
+}
+
+.search-mobile-sheet-actions {
+  position: sticky;
+  bottom: calc(-1 * env(safe-area-inset-bottom, 0px));
+  z-index: 2;
+  margin-top: 0.75rem;
+  padding-top: 0.8rem;
+  padding-bottom: calc(0.35rem + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(180deg, rgba(17, 33, 39, 0), var(--bg-alt) 26%);
 }
 
 /* M3 — Breadcrumb bar */

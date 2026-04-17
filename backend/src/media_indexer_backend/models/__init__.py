@@ -13,6 +13,9 @@ from media_indexer_backend.models.tables import (
     Source,
     User,
     UserGroup,
+    ShareLink,
+    TagVocabularyEntry,
+    TagSuggestion,
 )
 
 __all__ = [
@@ -37,4 +40,7 @@ __all__ = [
     "UserGroup",
     "UserRole",
     "UserStatus",
+    "ShareLink",
+    "TagVocabularyEntry",
+    "TagSuggestion",
 ]

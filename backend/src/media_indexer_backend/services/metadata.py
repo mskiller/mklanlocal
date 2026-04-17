@@ -764,6 +764,17 @@ def _clean_prompt_tag(value: str) -> str | None:
     return tag
 
 
+def canonicalize_tag(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = _clean_prompt_tag(value)
+    if cleaned:
+        return cleaned
+    fallback = value.strip().lower().replace(" ", "_")
+    fallback = re.sub(r"_+", "_", fallback).strip("._-")
+    return fallback or None
+
+
 def extract_prompt_tags(prompt: str | None, limit: int = 48) -> list[str]:
     if not prompt:
         return []
@@ -771,7 +782,7 @@ def extract_prompt_tags(prompt: str | None, limit: int = 48) -> list[str]:
     tags: list[str] = []
     seen: set[str] = set()
     for fragment in _PROMPT_TAG_SPLIT_RE.split(prompt):
-        tag = _clean_prompt_tag(fragment)
+        tag = canonicalize_tag(fragment)
         if not tag or tag in seen:
             continue
         seen.add(tag)
@@ -827,7 +838,7 @@ def prompt_tags_from_normalized(normalized: dict[str, Any] | None) -> list[str]:
     cleaned_stored_tags = []
     if isinstance(stored_prompt_tags, list):
         cleaned_stored_tags = [
-            tag for value in stored_prompt_tags if isinstance(value, str) if (tag := _clean_prompt_tag(value))
+            tag for value in stored_prompt_tags if isinstance(value, str) if (tag := canonicalize_tag(value))
         ]
 
     prompt = normalized.get("prompt")
@@ -842,6 +853,8 @@ def normalized_metadata_for_api(normalized: dict[str, Any] | None) -> dict[str, 
     prompt_tags = prompt_tags_from_normalized(payload)
     payload["prompt_tags"] = prompt_tags
     payload["prompt_tag_string"] = prompt_tag_string(prompt_tags)
+    payload["gps_latitude"] = payload.get("gps_lat")
+    payload["gps_longitude"] = payload.get("gps_lon")
     return payload
 
 
@@ -936,7 +949,8 @@ def _keywords_from_raw(exif: dict[str, Any] | None) -> list[str]:
 def build_tags(normalized: dict[str, Any], exif: dict[str, Any] | None = None) -> list[str]:
     tags: set[str] = set()
     for keyword in _keywords_from_raw(exif):
-        tags.add(keyword.strip().lower())
+        if canonical := canonicalize_tag(keyword):
+            tags.add(canonical)
 
     if make := normalized.get("camera_make"):
         tags.add(f"camera:{str(make).strip().lower()}")

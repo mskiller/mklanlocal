@@ -5,6 +5,8 @@ type SearchParamReader = Pick<URLSearchParams, "get">;
 export const DEFAULT_SEARCH_FILTERS: SearchFilterFormState = {
   q: "",
   media_type: "",
+  caption: "",
+  ocr_text: "",
   camera_make: "",
   camera_model: "",
   year: "",
@@ -15,6 +17,7 @@ export const DEFAULT_SEARCH_FILTERS: SearchFilterFormState = {
   duration_min: "",
   duration_max: "",
   tags: "",
+  auto_tags: "",
   min_rating: "",
   review_status: "",
   flagged: false,
@@ -76,6 +79,7 @@ export function parseSearchFilterState(searchParams: SearchParamReader): SearchF
     }
   });
   next.tags = parseTagList(next.tags).join(",");
+  next.auto_tags = parseTagList(next.auto_tags).join(",");
   return next;
 }
 
@@ -90,7 +94,7 @@ export function buildSearchQuery(filters: SearchFilterFormState): string {
       return;
     }
     if (value) {
-      params.set(key, key === "tags" ? parseTagList(String(value)).join(",") : String(value));
+      params.set(key, key === "tags" || key === "auto_tags" ? parseTagList(String(value)).join(",") : String(value));
     }
   });
   return params.toString();

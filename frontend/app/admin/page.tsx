@@ -14,18 +14,40 @@ import {
   fetchAdminSettings,
   fetchAdminUsers,
   fetchAuditLogs,
+  fetchClusteringResults,
   fetchCollections,
+  fetchRelatedTags,
   fetchScanJobs,
   fetchSources,
+  fetchTagProviders,
+  triggerClustering,
   rebuildTagSimilarity,
+  rebuildTags,
   resetAdminUserPassword,
   resetApplicationData,
   triggerScan,
   updateAdminSettings,
   updateAdminUser,
+  acceptClusterProposals,
+  fetchTagVocabulary,
+  createTagVocabularyEntry,
+  preloadTagProviders,
 } from "@/lib/api";
 import { formatDate } from "@/lib/asset-metadata";
-import { AdminSettings, AuditLogEntry, CollectionSummary, ScanJob, Source, UserSummary, UserRole, UserStatus } from "@/lib/types";
+import {
+  AdminSettings,
+  AuditLogEntry,
+  ClusterProposal,
+  CollectionSummary,
+  RelatedTag,
+  ScanJob,
+  Source,
+  TagProviderStatus,
+  TagVocabularyEntry,
+  UserRole,
+  UserStatus,
+  UserSummary,
+} from "@/lib/types";
 
 function findActiveJob(source: Source, jobs: ScanJob[]) {
   return jobs.find((job) => job.source_id === source.id && (job.status === "queued" || job.status === "running"));
@@ -50,16 +72,29 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [vocabulary, setVocabulary] = useState<TagVocabularyEntry[]>([]);
+  const [tagProviders, setTagProviders] = useState<TagProviderStatus[]>([]);
+  const [clusteringJobId, setClusteringJobId] = useState<string | null>(null);
+  const [clusteringResults, setClusteringResults] = useState<ClusterProposal[]>([]);
+  const [clusteringStatus, setClusteringStatus] = useState<string | null>(null);
+  const [newTag, setNewTag] = useState("");
+  const [newClipPrompt, setNewClipPrompt] = useState("");
+  const [rebuildProvider, setRebuildProvider] = useState<"" | "wd_vit_v3" | "deepghs_wd_embeddings" | "clip_vocab">("");
+  const [rebuildCompareMode, setRebuildCompareMode] = useState(false);
+  const [relatedTagQuery, setRelatedTagQuery] = useState("");
+  const [relatedTags, setRelatedTags] = useState<RelatedTag[]>([]);
 
   const load = async () => {
     try {
-      const [nextUsers, nextSources, nextJobs, nextAuditLogs, nextCollections, nextSettings] = await Promise.all([
+      const [nextUsers, nextSources, nextJobs, nextAuditLogs, nextCollections, nextSettings, nextVocabulary, nextProviders] = await Promise.all([
         fetchAdminUsers(),
         fetchSources(),
         fetchScanJobs(),
         fetchAuditLogs(40),
         fetchCollections(),
         fetchAdminSettings(),
+        fetchTagVocabulary(),
+        fetchTagProviders(),
       ]);
       setUsers(nextUsers);
       setSources(nextSources);
@@ -67,6 +102,8 @@ export default function AdminPage() {
       setAuditLogs(nextAuditLogs);
       setCollections(nextCollections);
       setSettings(nextSettings);
+      setVocabulary(nextVocabulary);
+      setTagProviders(nextProviders.providers);
       setDrafts(
         Object.fromEntries(
           nextUsers.map((entry) => [entry.id, { username: entry.username, role: entry.role, status: entry.status }])
@@ -578,12 +615,203 @@ export default function AdminPage() {
             </button>
           </div>
         </section>
+      </section>
+
+      <section className="two-column">
+        <section className="panel stack">
+          <div>
+            <p className="eyebrow">Auto-Collections</p>
+            <h2>CLIP Clustering</h2>
+          </div>
+          <p className="subdued">Analyze image embeddings to suggest new thematic collections.</p>
+          <div className="card-actions">
+            <button
+              className="button small-button"
+              type="button"
+              disabled={busy === "clustering" || clusteringStatus === "processing"}
+              onClick={async () => {
+                setBusy("clustering");
+                setClusteringStatus("processing");
+                try {
+                  const { job_id } = await triggerClustering(20, 5);
+                  setClusteringJobId(job_id);
+                  // Polling loop
+                  const poll = async () => {
+                    const res = await fetchClusteringResults(job_id);
+                    if (Array.isArray(res)) {
+                      setClusteringResults(res);
+                      setClusteringStatus("ready");
+                    } else if (res.status === "processing") {
+                      setTimeout(poll, 2000);
+                    } else {
+                      setClusteringStatus("error");
+                    }
+                  };
+                  void poll();
+                } catch (e) {
+                  setError("Clustering failed");
+                  setClusteringStatus("error");
+                } finally {
+                  setBusy(null);
+                }
+              }}
+            >
+              Suggest Collections
+            </button>
+          </div>
+          {clusteringStatus === "processing" && <label className="subdued">Analyzing vectors...</label>}
+          {clusteringStatus === "ready" && clusteringResults.length > 0 && (
+            <div className="list-stack compact-list-stack" style={{ maxHeight: "300px", overflowY: "auto" }}>
+               {clusteringResults.map((prop, idx) => (
+                 <div key={idx} className="metadata-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                   <span>{prop.suggested_label} ({prop.size} items)</span>
+                   <button className="button small-button" onClick={async () => {
+                      await acceptClusterProposals([{ label: prop.suggested_label, asset_ids: prop.asset_ids }]);
+                      setClusteringResults(prev => prev.filter((_, i) => i !== idx));
+                      setMessage("Collection created!");
+                      await load();
+                   }}>Accept</button>
+                 </div>
+               ))}
+            </div>
+          )}
+        </section>
 
         <section className="panel stack">
           <div>
-            <p className="eyebrow">Recent Audit Activity</p>
-            <h2>Latest actions</h2>
+            <p className="eyebrow">AI Tagging</p>
+            <h2>Providers and vocabulary</h2>
           </div>
+          <div className="list-stack compact-list-stack" style={{ maxHeight: "180px", overflowY: "auto" }}>
+            {tagProviders.map((provider) => (
+              <div key={provider.key} className="metadata-row">
+                <strong>{provider.label}</strong>
+                <p className="subdued">{provider.source_model}</p>
+                <p className="subdued">{provider.status} · {provider.device}{provider.detail ? ` · ${provider.detail}` : ""}</p>
+              </div>
+            ))}
+          </div>
+          <div className="field-grid">
+            <label className="field">
+              <span>Rebuild Provider</span>
+              <select value={rebuildProvider} onChange={(event) => setRebuildProvider(event.target.value as typeof rebuildProvider)}>
+                <option value="">Default stack</option>
+                <option value="wd_vit_v3">WD ViT v3</option>
+                <option value="deepghs_wd_embeddings">DeepGHS embeddings</option>
+                <option value="clip_vocab">CLIP vocabulary only</option>
+              </select>
+            </label>
+            <label className="field checkbox-field">
+              <span>Compare Mode</span>
+              <input type="checkbox" checked={rebuildCompareMode} onChange={(event) => setRebuildCompareMode(event.target.checked)} />
+            </label>
+          </div>
+          <div className="card-actions">
+            <button
+              className="button ghost-button small-button"
+              type="button"
+              disabled={busy === "preload-taggers"}
+              onClick={async () => {
+                setBusy("preload-taggers");
+                setError(null);
+                setMessage(null);
+                try {
+                  const response = await preloadTagProviders();
+                  setTagProviders(response.providers);
+                  setMessage("Model cache warmed for local tagging.");
+                } catch (nextError) {
+                  setError(nextError instanceof Error ? nextError.message : "Unable to preload tag providers.");
+                } finally {
+                  setBusy(null);
+                }
+              }}
+            >
+              Warm Local Models
+            </button>
+            <button
+              className="button small-button"
+              type="button"
+              disabled={busy === "rebuild-ai-tags"}
+              onClick={async () => {
+                setBusy("rebuild-ai-tags");
+                setError(null);
+                setMessage(null);
+                try {
+                  const result = await rebuildTags({
+                    scope: "all",
+                    provider: rebuildProvider || undefined,
+                    compare_mode: rebuildCompareMode,
+                  });
+                  setMessage(`Rebuilt AI tags for ${result.processed_assets} assets and generated ${result.created_suggestions} suggestions.`);
+                  await load();
+                } catch (nextError) {
+                  setError(nextError instanceof Error ? nextError.message : "Unable to rebuild AI tags.");
+                } finally {
+                  setBusy(null);
+                }
+              }}
+            >
+              Rebuild AI Tags
+            </button>
+          </div>
+          <div className="list-stack compact-list-stack" style={{ maxHeight: "200px", overflowY: "auto" }}>
+            {vocabulary.map((v) => (
+              <div key={v.id} className="metadata-row">
+                <strong>{v.tag}</strong>
+                <p className="subdued">{v.clip_prompt}</p>
+              </div>
+            ))}
+          </div>
+          <div className="stack" style={{ gap: "0.5rem", marginTop: "1rem" }}>
+            <input className="input" placeholder="Tag Name" value={newTag} onChange={e => setNewTag(e.target.value)} />
+            <input className="input" placeholder="CLIP Prompt" value={newClipPrompt} onChange={e => setNewClipPrompt(e.target.value)} />
+            <button className="button small-button" onClick={async () => {
+              setError(null);
+              try {
+                await createTagVocabularyEntry({ tag: newTag, clip_prompt: newClipPrompt });
+                setNewTag("");
+                setNewClipPrompt("");
+                const nextVocab = await fetchTagVocabulary();
+                setVocabulary(nextVocab);
+              } catch (nextError) {
+                setError(nextError instanceof Error ? nextError.message : "Unable to add vocabulary entry.");
+              }
+            }}>Add Entry</button>
+          </div>
+          <div className="stack" style={{ gap: "0.5rem", marginTop: "1rem" }}>
+            <p className="eyebrow">Related Tag Explorer</p>
+            <div className="card-actions">
+              <input className="input" placeholder="Enter a tag to explore" value={relatedTagQuery} onChange={(event) => setRelatedTagQuery(event.target.value)} />
+              <button className="button small-button" onClick={async () => {
+                if (!relatedTagQuery.trim()) {
+                  setRelatedTags([]);
+                  return;
+                }
+                try {
+                  setRelatedTags(await fetchRelatedTags(relatedTagQuery.trim()));
+                } catch (nextError) {
+                  setError(nextError instanceof Error ? nextError.message : "Unable to fetch related tags.");
+                }
+              }}>Explore</button>
+            </div>
+            {relatedTags.length ? (
+              <div className="chip-row">
+                {relatedTags.map((tag) => (
+                  <span key={`${tag.source_model}-${tag.tag}`} className="chip">
+                    {tag.tag} · {(tag.score * 100).toFixed(0)}%
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </section>
+      </section>
+
+      <section className="panel stack">
+        <div>
+          <p className="eyebrow">Recent Audit Activity</p>
+          <h2>Latest actions</h2>
+        </div>
           <div className="list-stack compact-list-stack">
             {auditLogs.map((entry) => (
               <article key={entry.id} className="metadata-row">
@@ -594,7 +822,6 @@ export default function AdminPage() {
             ))}
           </div>
         </section>
-      </section>
     </AppShell>
   );
 }
