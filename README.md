@@ -1,7 +1,7 @@
 # MKLanLocal
 
-> A self-hosted media indexer for your local photo and video library.  
-> Search, curate, and explore tens of thousands of images — all on your own hardware.
+> A self-hosted, modular media indexer for local photo and video libraries.
+> Search, curate, enrich, and process media on your own hardware with built-in modules plus installable addons.
 
 **Stack:** FastAPI · Next.js · PostgreSQL + pgvector · Docker Compose
 
@@ -9,67 +9,119 @@
 
 ## Screenshots
 
-### Browse Indexed — Gallery view
-Browse and curate your entire indexed library with filters, sort options, bulk-select, and collection shortcuts. Hover or long-press any tile for quick actions.
+### Browse Indexed - Gallery view
+Browse and curate your indexed library with filters, sort options, bulk select, and quick actions.
 
 ![Browse Indexed gallery view](docs/screenshots/browse-indexed.png)
 
-### Asset Explorer — Detail & Inspector panel
-Click any image to open the full-screen explorer with a filmstrip, zoom controls, and an inspector panel showing the prompt, dimensions, file size, and modification date. Stage assets directly for side-by-side comparison.
+### Asset Explorer - Detail and inspector panel
+Open any image in the full-screen explorer with filmstrip navigation, zoom tools, metadata inspection, and compare staging.
 
 ![Asset explorer with inspector panel](docs/screenshots/explorer-detail.png)
 
-### Scan Jobs — Real-time progress tracking
-Monitor all scan jobs in near real time: running, cancelled, and completed — with per-job counters for scanned, new, updated, deleted, and error counts.
+### Scan Jobs - Real-time progress tracking
+Monitor queued, running, cancelled, and completed scan jobs with live counters.
 
 ![Scan jobs dashboard](docs/screenshots/scan-jobs.png)
 
 ---
 
-## What's new in v1.9
+## Modular Platform Highlights
 
-- **Local AI enrichment pipeline** — Image scans now support `SmilingWolf/wd-vit-tagger-v3` as the primary local tagger, `deepghs/wd14_tagger_with_embeddings` for fallback and related-tag lookups, CLIP vocabulary post-tagging, BLIP captions, and Tesseract OCR.
-- **Timeline view** — Browse the indexed library by year, month, and day from a dedicated `Timeline` screen in the main navigation.
-- **Public share links** — Share individual assets or full collections through tokenized public links with optional downloads.
-- **Admin clustering suggestions** — Generate CLIP-based collection proposals from existing embeddings and accept them directly from the admin UI.
-- **Search and review upgrades** — Search now supports caption, OCR text, and accepted auto-tag filters; asset detail shows grouped AI suggestions plus caption/OCR metadata.
-- **Mobile and explorer polish** — The mobile search filter sheet keeps its action bar reachable, and the Explorer overlay opens images fit-to-view instead of over-zoomed.
+- **Module registry** - Built-in modules and installed addons now flow through the same registry, admin controls, and navigation system.
+- **Admin module control** - Enable, disable, inspect, and rescan modules from `/admin/modules`.
+- **Addon workbenches** - Installed addons expose user workbenches at `/modules/{id}` and admin settings/presets at `/admin/modules/{id}`.
+- **Derivative-first image tooling** - First-wave addons create artifacts, preserve history, and promote accepted results into draft uploads instead of mutating originals.
+- **Local AI pipeline** - WD taggers, CLIP vocabulary tagging, captions, OCR, and related review surfaces run locally after model download.
+- **Broader curation surface** - Shares, inbox/upload, smart albums, characters, people, map, and timeline features now sit alongside the core browse/search workflow.
 
 ---
 
-## Features
+## Core Surfaces
 
-| | |
+| Surface | What it does |
 |---|---|
-| 📁 **Source management** | Mount any number of local folders as named sources |
-| 🔍 **Full-text + faceted search** | Filter by camera, year, dimensions, duration, tags, rating, review status |
-| 🗓️ **Timeline navigation** | Drill down through year, month, and day for photo-library style browsing |
-| 🔁 **Near-duplicate detection** | Perceptual hash (pHash) with configurable threshold |
-| 🧠 **Semantic similarity** | CLIP embeddings in pgvector — "find visually similar" on any image |
-| 🤖 **Local AI enrichment** | WD taggers, CLIP vocabulary tagging, BLIP captions, and OCR all run locally after initial model download |
-| ⚖️ **Side-by-side comparison** | Pixel-locked pan/zoom sync, overlay diff, metadata diff table |
-| 🗂️ **Collections** | Named groups; bulk add/remove from gallery or search |
-| 🪄 **Collection suggestions** | Generate proposed collections from existing CLIP embeddings in the Admin UI |
-| 🔗 **Public sharing** | Time-limited share links for assets or collections with optional download access |
-| ⭐ **Asset annotations** | Per-user rating, review status, curator notes, flagged toggle |
-| ✅ **Bulk curation** | Multi-select with right-click / long-press context menu |
-| 👥 **User management** | Admin / curator / guest roles; groups with fine-grained permissions |
-| 🔒 **Lock & ban** | Time-limited locks (auto-lift) or permanent bans with a reason |
-| 💾 **Backup & restore** | Streams a ZIP with pg_dump + SHA256 manifest; dry-run supported |
-| 🖼️ **BlurHash previews** | Instant placeholders while gallery thumbnails load |
-| 🔬 **Deep Zoom viewer** | Tile-based viewer for gigapixel images |
-| 📱 **Touch support** | Swipe navigation in the image explorer |
-| 📊 **Virtualized gallery** | 10 000+ images with no jank |
-| 📋 **Structured JSON logging** | All services emit newline-delimited JSON |
+| **Dashboard** | Overview of sources, scan activity, and recent indexed media |
+| **Sources** | Register approved roots and launch scans |
+| **Browse Indexed** | Review indexed media with bulk actions and explorer launchers |
+| **Search** | Query indexed metadata, captions, OCR text, tags, and filters |
+| **Compare** | Side-by-side review with synchronized pan/zoom |
+| **Shares + Export** | Publish tokenized share links and derivative exports |
+| **Inbox + Upload** | Stage uploaded or promoted draft assets before final acceptance |
+| **Scan Jobs** | Track worker progress and scan history |
+| **Admin Center** | Manage users, settings, modules, health, integrations, and audits |
+
+---
+
+## Built-in Modules
+
+Built-ins ship in this repository and register through platform manifests under `backend/src/media_indexer_backend/platform/manifests/`.
+
+| Module | Default state | Current behavior |
+|---|---|---|
+| **AI Tagging** | Enabled | Tagging, captions, OCR, provider status, and review controls |
+| **Collections** | Enabled | Manual named groups of assets |
+| **Smart Albums** | Enabled | Rule-based and suggested albums |
+| **Characters** | Enabled | SillyTavern PNG character-card extraction, browsing, and editing |
+| **Timeline** | Disabled by default | Calendar-style browsing across indexed assets |
+| **People** | Disabled by default | Face detection, clustering, and people browsing |
+| **Geo / Map** | Disabled by default | GPS-aware map browsing |
+
+---
+
+## First-Wave Addons
+
+Installed addons are locked in `addons.toml`, each addon carries its own `mklan-addon.toml`, and changes to either must be followed by `python scripts/sync-addons`.
+
+| Addon | Current behavior | Notes |
+|---|---|---|
+| **Metadata Privacy** | Inspect, strip, and selectively preserve metadata for share-safe derivatives | Works on derivative exports, not originals |
+| **Export Recipes** | Run named export presets for resize, format conversion, overlays, and contact sheets | Depends on `collections` |
+| **Background Removal** | Generate transparent cutouts and alpha-mask artifacts | Derivative PNG/WebP outputs |
+| **Upscale + Restore** | Create cached x2/x4 upscale derivatives with denoise and sharpening | Settings-aware artifact reuse |
+| **Object Erase** | Apply saved rectangle masks and generate erased draft variants for review | Review-first, draft promotion flow |
+
+All five addons share the same operator pattern:
+
+- explicit user-triggered jobs
+- module-owned presets
+- artifact history per asset
+- compare-before-accept review
+- `promote-to-draft` instead of overwriting originals
+- derivative outputs by default
+
+### Addon Job API Contract
+
+These routes power the first-wave addon workflow:
+
+```text
+POST /api/modules/{id}/jobs
+GET  /api/modules/{id}/jobs/{jobId}
+GET  /api/modules/{id}/assets/{assetId}/artifacts
+POST /api/modules/{id}/artifacts/{artifactId}/promote
+```
+
+For addon authoring and installation details, see [docs/addons.md](docs/addons.md).
+
+---
+
+## Modular Platform Model
+
+- **Built-in modules** are first-party features defined by platform manifests and can expose dedicated routes such as `/collections`, `/smart-albums`, `/map`, or `/people`.
+- **Installed addons** are discovered from `addons.toml`, synced into generated registries, and mounted through `/modules/{id}` plus `/admin/modules/{id}`.
+- **Generated registries** live at `backend/generated/addon-manifest-registry.json` and `frontend/generated/addon-manifest-registry.json`.
+- **Admin flow** is install or vendor the addon, run `python scripts/sync-addons`, rebuild/restart the stack, then enable the module from `/admin/modules`.
+- **Runtime safety** keeps disabled modules out of user/admin navigation and preserves addon data when a module is turned off.
 
 ---
 
 ## Requirements
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Compose plugin)
-- 4 GB RAM recommended for the worker (CLIP runs on CPU by default)
-- The CLIP model (~600 MB) downloads from HuggingFace on first start and is cached persistently
-- Optional local AI enrichment downloads additional Hugging Face assets (WD taggers, embedding pack, caption model) the first time those features are used
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine with the Compose plugin
+- Python 3.12 for local backend or worker development
+- Node.js 20+ for local frontend development
+- 4 GB RAM recommended for the worker
+- First-run model downloads for CLIP and optional local AI providers are cached after initial use
 
 ---
 
@@ -84,58 +136,54 @@ cd mklanlocal
 cp .env.example .env
 ```
 
-Open `.env` and set **every value marked `CHANGE_ME`**:
+Open `.env` and replace every `CHANGE_ME` value.
 
 ```bash
 # Generate a strong session secret
 openssl rand -hex 32
-# Paste the output as SESSION_SECRET in .env
-
-# Set strong passwords for ADMIN_PASSWORD, CURATOR_PASSWORD, POSTGRES_PASSWORD
 ```
 
 ```bash
-# 3. Validate your .env before starting (recommended)
+# 3. Validate your environment
 bash scripts/check-env.sh
 
-# 4. (Optional) Mount your media folders — see "Adding Sources" below
+# 4. Optional: mount additional media folders in infra/docker-compose.yml
 
-# 5. Build and start
+# 5. If you changed addons.toml or any addon manifest, resync the addon registry
+python scripts/sync-addons
+
+# 6. Build and start the stack
 docker compose -f infra/docker-compose.yml up --build
-
-# 5. Open the app
-open http://localhost:3000
-# Log in with your ADMIN_USERNAME / ADMIN_PASSWORD from .env
 ```
 
-> **First run:** The stack takes ~2–3 minutes to build. The CLIP model downloads on the first scan (~600 MB, cached after that). Subsequent starts are fast.
+Open [http://localhost:3000](http://localhost:3000) and sign in with the seeded admin credentials from `.env`.
+
+> **First run:** image models and optional AI providers download on demand and are cached for later runs.
 
 ---
 
-## Adding Sources (Your Media Folders)
+## Adding Sources
 
-Media folders must be bind-mounted into both the `backend` and `worker` containers. Edit `infra/docker-compose.yml` and add your folders in both services:
+Media folders must be bind-mounted into both the `backend` and `worker` containers. Edit `infra/docker-compose.yml` and add the same mount in both services:
 
 ```yaml
 services:
   backend:
     volumes:
-      # ... existing volumes ...
       - type: bind
-        source: /absolute/path/to/your/photos   # host path
-        target: /data/sources/photos            # container path (must start with /data/sources/)
+        source: /absolute/path/to/your/photos
+        target: /data/sources/photos
         read_only: true
 
   worker:
     volumes:
-      # ... existing volumes ...
       - type: bind
-        source: /absolute/path/to/your/photos   # same host path
-        target: /data/sources/photos            # same container path
+        source: /absolute/path/to/your/photos
+        target: /data/sources/photos
         read_only: true
 ```
 
-**Windows paths** use forward slashes or escaped backslashes:
+Windows examples:
 
 ```yaml
 source: C:/Users/YourName/Pictures
@@ -143,108 +191,76 @@ source: C:/Users/YourName/Pictures
 source: C:\\Users\\YourName\\Pictures
 ```
 
-After editing the compose file, restart the stack:
+Restart the stack, then add the same container path from **Admin -> Sources** and launch a scan.
 
-```bash
-docker compose -f infra/docker-compose.yml up --build
-```
-
-Then go to **Admin → Sources → Add Source**, enter the container path (e.g. `/data/sources/photos`), and click **Scan**.
-
-Tip: keep personal bind mounts in a local `infra/docker-compose.override.yml` instead of editing the tracked compose file directly.
+Tip: keep personal mounts in a local `infra/docker-compose.override.yml` instead of editing the tracked compose file directly.
 
 ---
 
 ## Configuration
 
-All settings live in `.env`. The most important ones:
+Core secrets and runtime defaults live in `.env`. A few important settings:
 
 | Variable | Description |
 |---|---|
-| `SESSION_SECRET` | **Required.** Generate with `openssl rand -hex 32`. Server won't start without it. |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Seed admin account created on first startup |
-| `CURATOR_USERNAME` / `CURATOR_PASSWORD` | Seed curator account |
-| `GUEST_USERNAME` / `GUEST_PASSWORD` | Seed guest account (read-only) |
+| `SESSION_SECRET` | Required session secret |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Seeded admin account |
+| `CURATOR_USERNAME` / `CURATOR_PASSWORD` | Seeded curator account |
+| `GUEST_USERNAME` / `GUEST_PASSWORD` | Seeded guest account |
 | `POSTGRES_PASSWORD` | Database password |
-| `CLIP_ENABLED` | `true` / `false` — disable if you don't need semantic search |
-| `CLIP_DEVICE` | `cpu` (default) or `cuda` if you have an NVIDIA GPU |
-| `CLIP_MODEL_ID` | HuggingFace model ID (default: `openai/clip-vit-base-patch32`) |
-| `MAX_THUMBNAIL_SIZE` | Max thumbnail dimension in pixels (default: `512`) |
-| `DUPLICATE_PHASH_THRESHOLD` | Hamming distance for duplicate detection (default: `8`) |
+| `ALLOWED_SOURCE_ROOTS` | Approved container-side source roots |
+| `CLIP_ENABLED` / `CLIP_MODEL_ID` / `CLIP_DEVICE` | Local similarity and AI enrichment controls |
+| `WORKER_POLL_INTERVAL_SECONDS` | Worker queue polling interval |
 
-Runtime settings (thumbnail size, CLIP thresholds, cache limits, poll interval) can also be adjusted live via **Admin → Settings** without restarting.
+Live runtime settings are split between:
+
+- **Admin Center** for general app settings
+- **Admin -> Modules** for per-module settings, enable state, and addon presets
 
 ---
 
 ## Architecture
 
-```
+```text
 Browser
-  └─▶ Next.js  :3000  (standalone output)
-        └─▶ FastAPI  :8000  (proxied via Next.js rewrites)
-              ├─▶ PostgreSQL :5432  (pgvector extension)
-              └─▶ Worker  (scan · pHash · CLIP · previews · BlurHash)
-                    └─▶ Mounted source folders  (read-only)
+  -> Next.js frontend :3000
+      -> FastAPI backend :8000
+          -> Core routes + module registry
+              -> built-in module routes (/collections, /smart-albums, /map, ...)
+              -> addon routes (/api/modules/{id}, /modules/{id}, /admin/modules/{id})
+          -> PostgreSQL :5432
+          -> Worker services (scan, previews, AI enrichment, module jobs)
+              -> mounted media sources + upload/inbox storage
 ```
 
-All four services run in Docker. The worker polls for pending scan jobs and processes files asynchronously — the UI stays responsive while large libraries index.
-
----
-
-## User Roles
-
-| Role | Can do |
-|---|---|
-| **admin** | Everything: sources, scans, users, groups, settings, backup/restore |
-| **curator** | Browse, search, annotate, rate, review, manage collections, upload |
-| **guest** | Browse and search only (read-only) |
-
-Groups can override role permissions on a per-source basis (e.g. give a curator access to specific sources only).
-
----
-
-## GPU Acceleration (optional)
-
-If you have an NVIDIA GPU:
-
-1. Install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-2. Set `CLIP_DEVICE=cuda` in `.env`
-3. Add to the `worker` service in `docker-compose.yml`:
-
-```yaml
-deploy:
-  resources:
-    reservations:
-      devices:
-        - driver: nvidia
-          count: 1
-          capabilities: [gpu]
-```
+Addon discovery is generated from `addons.toml` plus each addon's `mklan-addon.toml`, then materialized into backend and frontend registries before runtime.
 
 ---
 
 ## Development
 
-### Backend (FastAPI + Python 3.12)
+### Repo-level addon sync
+
+Run this whenever you change `addons.toml` or any `mklan-addon.toml`:
+
+```bash
+python scripts/sync-addons
+```
+
+That refreshes:
+
+- `backend/generated/addon-manifest-registry.json`
+- `frontend/generated/addon-manifest-registry.json`
+
+### Backend
 
 ```bash
 cd backend
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-
-# Start a local Postgres first (or use the Docker one on port 5432)
-uvicorn media_indexer_backend.main:app --reload --port 8000
-```
-
-Run migrations:
-
-```bash
 alembic upgrade head
-```
-
-Run tests:
-
-```bash
+uvicorn media_indexer_backend.main:app --reload --port 8000
 pytest tests/
 ```
 
@@ -252,45 +268,47 @@ pytest tests/
 
 ```bash
 cd worker
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
 python -m media_indexer_worker.main
 ```
 
-### Frontend (Next.js + TypeScript)
+### Frontend
 
 ```bash
 cd frontend
 npm install
-npm run dev     # http://localhost:3000
-npm run lint
-npm run build   # production build check
+npm run dev
+npm run build
 ```
+
+For addon authoring details, manifest structure, and install flow, see [docs/addons.md](docs/addons.md).
 
 ---
 
-## Backup & Restore
+## Backup and Restore
 
-**Create a backup** (downloads as a ZIP):
+**Create a backup** from the Admin UI or through:
 
-```
+```text
 GET /admin/backup
 ```
 
-Or from the Admin UI: **Admin → Maintenance → Download Backup**.
+The archive contains:
 
-The ZIP contains:
-- `dump.sql` — full pg_dump
-- `manifest.json` — alembic revision, app version, timestamps
-- `checksums.sha256` — SHA256 of every file in the archive
+- `dump.sql`
+- `manifest.json`
+- `checksums.sha256`
 
-**Restore:**
+**Restore** with:
 
+```text
+POST /admin/restore
+POST /admin/restore?dry_run=true
 ```
-POST /admin/restore          # validates checksums then restores
-POST /admin/restore?dry_run=true   # validate only, no changes
-```
 
-> ⚠️ Restore drops and recreates the database. Back up first.
+> Restore drops and recreates the database. Back up first.
 
 ---
 
@@ -298,62 +316,30 @@ POST /admin/restore?dry_run=true   # validate only, no changes
 
 ```bash
 git pull
+python scripts/sync-addons   # needed when addon lock/manifests changed
 docker compose -f infra/docker-compose.yml up --build
 ```
 
-Alembic migrations run automatically on backend startup. They are idempotent and safe to re-run.
+Alembic migrations run automatically on backend startup.
 
 ---
 
 ## Security Notes
 
-### Pre-flight check
-Run before every first deployment or after editing `.env`:
-```bash
-bash scripts/check-env.sh
-```
-This validates that all `CHANGE_ME` placeholders have been replaced and that passwords meet minimum length requirements.
-
-### Secrets & passwords
-- `SESSION_SECRET` **must** be set to a strong random value — generate with `openssl rand -hex 32`. The server refuses to start with the default in any non-development environment.
-- Passwords are hashed with **Argon2** (argon2-cffi). Plain-text passwords are never stored.
-- Login is rate-limited to 10 attempts per minute per IP.
-
-### Network exposure
-- **PostgreSQL (port 5432)** is exposed on `0.0.0.0` by default in `docker-compose.yml`. On a LAN-only machine this is usually fine, but you should either restrict it to localhost or remove the port mapping entirely if you don't need direct DB access from outside the container network:
-  ```yaml
-  # Restrict to localhost only:
-  ports:
-    - "127.0.0.1:5432:5432"
-  ```
-- The backend (port 8000) and frontend (port 3000) are similarly LAN-exposed. If you need to serve over the internet, put them behind a reverse proxy (nginx, Caddy, Tailscale) with TLS and set `COOKIE_SECURE=true` in `.env`.
-
-### Source path safety
-- File paths are validated against `ALLOWED_SOURCE_ROOTS` on every request — path traversal outside mounted folders is rejected at the application layer.
-
-### Backups
-- `GET /admin/backup` produces a ZIP containing `dump.sql` — **this file contains all your data including hashed passwords**. Treat backup files like credentials:
-  - Store them encrypted or in an access-controlled location.
-  - Do not commit them to git (the `backup/` folder is already in `.gitignore`).
-  - Delete old backups you no longer need.
-- Backups include a `checksums.sha256` manifest. The restore endpoint validates all checksums before touching the database.
+- Replace all default secrets in `.env` before any real deployment.
+- Passwords are hashed with Argon2.
+- Backup archives contain sensitive data and should be handled like credentials.
+- Source paths are validated against `ALLOWED_SOURCE_ROOTS`.
+- If you expose the app beyond localhost or a trusted LAN, place it behind a reverse proxy with TLS.
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). In short:
-
-1. Fork and clone
-2. `cp .env.example .env` and fill in values
-3. `docker compose -f infra/docker-compose.yml up --build`
-4. Make your changes, run `ruff check .` (backend) and `npm run lint` (frontend)
-5. Open a PR with a CHANGELOG entry
+See [CONTRIBUTING.md](CONTRIBUTING.md). For platform extensions, start with [docs/addons.md](docs/addons.md).
 
 ---
 
-**"Mskiller note: This was totally done with AI, using both Claude and Chatgpt, it was just a first test, and will improve, it still a lot buggy, but good for a first step. after those words, the restof the readme is written by claude. and as for the code, it was written by both claude and gpt I could'nt say Author's note, could I? :) "**
-
 ## License
 
-MIT — see [LICENSE](LICENSE)
+MIT - see [LICENSE](LICENSE)
