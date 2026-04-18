@@ -3,7 +3,7 @@ name = "Metadata Privacy"
 version = "0.1.0"
 description = "Inspect, strip, and selectively preserve metadata for share-safe derivatives."
 platform_api_version = "1"
-enabled_by_default = false
+enabled_by_default = true
 permissions = ["metadata_privacy.read", "metadata_privacy.write"]
 dependencies = []
 

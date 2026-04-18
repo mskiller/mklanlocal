@@ -3,7 +3,7 @@ name = "Background Removal"
 version = "0.1.0"
 description = "Generate transparent cutouts and alpha masks from indexed images."
 platform_api_version = "1"
-enabled_by_default = false
+enabled_by_default = true
 permissions = ["background_removal.read", "background_removal.write"]
 dependencies = []
 

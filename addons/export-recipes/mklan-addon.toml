@@ -3,7 +3,7 @@ name = "Export Recipes"
 version = "0.1.0"
 description = "Run reusable export presets for web shares, overlays, and collection contact sheets."
 platform_api_version = "1"
-enabled_by_default = false
+enabled_by_default = true
 permissions = ["export_recipes.read", "export_recipes.write"]
 dependencies = ["collections"]
 

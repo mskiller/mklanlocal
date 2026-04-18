@@ -20,6 +20,11 @@ def test_first_wave_addons_are_discovered():
     assert manifest_map["export_recipes"].dependencies == ["collections"]
     assert manifest_map["background_removal"].user_mount == "/modules/background_removal"
     assert manifest_map["metadata_privacy"].admin_mount == "/admin/modules/metadata_privacy"
+    assert manifest_map["metadata_privacy"].enabled_by_default is True
+    assert manifest_map["export_recipes"].enabled_by_default is True
+    assert manifest_map["background_removal"].enabled_by_default is True
+    assert manifest_map["upscale_restore"].enabled_by_default is True
+    assert manifest_map["object_erase"].enabled_by_default is True
 
 
 def test_vendored_addon_runtime_paths_are_exposed():

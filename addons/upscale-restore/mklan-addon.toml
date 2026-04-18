@@ -3,7 +3,7 @@ name = "Upscale + Restore"
 version = "0.1.0"
 description = "Create cached x2/x4 upscale derivatives with light denoise and sharpening."
 platform_api_version = "1"
-enabled_by_default = false
+enabled_by_default = true
 permissions = ["upscale_restore.read", "upscale_restore.write"]
 dependencies = []
 

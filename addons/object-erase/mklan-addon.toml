@@ -3,7 +3,7 @@ name = "Object Erase"
 version = "0.1.0"
 description = "Apply saved rectangle masks and generate erased draft variants for review."
 platform_api_version = "1"
-enabled_by_default = false
+enabled_by_default = true
 permissions = ["object_erase.read", "object_erase.write"]
 dependencies = []
 
