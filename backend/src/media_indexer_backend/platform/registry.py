@@ -13,7 +13,10 @@ MANIFEST_DIR = Path(__file__).resolve().parent / "manifests"
 def find_repo_root(start: Path | None = None) -> Path:
     current = (start or Path(__file__).resolve()).parent
     for candidate in [current, *current.parents]:
-        if (candidate / "infra" / "docker-compose.yml").exists() and (candidate / "backend").exists():
+        has_backend_dir = (candidate / "backend").exists()
+        has_compose_layout = (candidate / "infra" / "docker-compose.yml").exists()
+        has_addon_layout = (candidate / "addons.toml").exists()
+        if has_backend_dir and (has_compose_layout or has_addon_layout):
             return candidate
     return Path.cwd()
 
