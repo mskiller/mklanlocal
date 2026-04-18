@@ -23,9 +23,12 @@ class AuthCapabilities(BaseModel):
     can_manage_sources: bool
     can_run_scans: bool
     can_review_compare: bool
+    can_curate_assets: bool
     can_reset: bool
     can_manage_users: bool
     can_manage_collections: bool
+    can_manage_shares: bool
+    can_manage_smart_albums: bool
     can_upload_assets: bool
     can_view_admin: bool
     allowed_source_ids: list[UUID] | Literal["all"]

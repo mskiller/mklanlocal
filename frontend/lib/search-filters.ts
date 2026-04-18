@@ -16,6 +16,7 @@ export const DEFAULT_SEARCH_FILTERS: SearchFilterFormState = {
   height_max: "",
   duration_min: "",
   duration_max: "",
+  has_gps: false,
   tags: "",
   auto_tags: "",
   min_rating: "",
@@ -62,6 +63,7 @@ export function parseSearchFilterState(searchParams: SearchParamReader): SearchF
         if (
           value === "relevance" ||
           value === "created_at" ||
+          value === "indexed_at" ||
           value === "modified_at" ||
           value === "filename" ||
           value === "rating" ||
@@ -73,6 +75,10 @@ export function parseSearchFilterState(searchParams: SearchParamReader): SearchF
       }
       if (key === "flagged") {
         next.flagged = value === "true";
+        return;
+      }
+      if (key === "has_gps") {
+        next.has_gps = value === "true";
         return;
       }
       next[key] = value;
@@ -87,9 +93,9 @@ export function buildSearchQuery(filters: SearchFilterFormState): string {
   const params = new URLSearchParams();
   FILTER_KEYS.forEach((key) => {
     const value = filters[key];
-    if (key === "flagged") {
-      if (filters.flagged) {
-        params.set("flagged", "true");
+    if (key === "flagged" || key === "has_gps") {
+      if (filters[key]) {
+        params.set(key, "true");
       }
       return;
     }

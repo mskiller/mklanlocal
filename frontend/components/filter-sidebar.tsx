@@ -110,6 +110,14 @@ export function FilterSidebar({
           onChange={(event) => onChange({ ...value, flagged: event.target.checked })}
         />
       </label>
+      <label className="field checkbox-field">
+        <span>Has GPS</span>
+        <input
+          type="checkbox"
+          checked={value.has_gps}
+          onChange={(event) => onChange({ ...value, has_gps: event.target.checked })}
+        />
+      </label>
       <label className="field">
         <span>Tags</span>
         <input value={value.tags} onChange={(event) => update("tags", event.target.value)} placeholder="camera:canon,travel" />
@@ -137,6 +145,7 @@ export function FilterSidebar({
         <select value={value.sort} onChange={(event) => update("sort", event.target.value as SearchFilterFormState["sort"])}>
           <option value="relevance">Relevance</option>
           <option value="created_at">Created Date</option>
+          <option value="indexed_at">Indexed Date</option>
           <option value="modified_at">Modified Date</option>
           <option value="filename">Filename</option>
           <option value="rating">Rating</option>

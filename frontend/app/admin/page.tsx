@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { useAuth } from "@/components/auth-provider";
+import { useModuleRegistry } from "@/components/module-registry-provider";
 import {
   cancelScanJob,
   createAdminUser,
@@ -53,8 +54,13 @@ function findActiveJob(source: Source, jobs: ScanJob[]) {
   return jobs.find((job) => job.source_id === source.id && (job.status === "queued" || job.status === "running"));
 }
 
+function looksLikeHostPath(path: string) {
+  return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
+
 export default function AdminPage() {
   const { user } = useAuth();
+  const { isModuleEnabled, loading: modulesLoading } = useModuleRegistry();
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [jobs, setJobs] = useState<ScanJob[]>([]);
@@ -83,18 +89,23 @@ export default function AdminPage() {
   const [rebuildCompareMode, setRebuildCompareMode] = useState(false);
   const [relatedTagQuery, setRelatedTagQuery] = useState("");
   const [relatedTags, setRelatedTags] = useState<RelatedTag[]>([]);
+  const collectionsModuleEnabled = isModuleEnabled("collections");
+  const aiTaggingModuleEnabled = isModuleEnabled("ai_tagging");
 
   const load = async () => {
+    if (modulesLoading) {
+      return;
+    }
     try {
       const [nextUsers, nextSources, nextJobs, nextAuditLogs, nextCollections, nextSettings, nextVocabulary, nextProviders] = await Promise.all([
         fetchAdminUsers(),
         fetchSources(),
         fetchScanJobs(),
         fetchAuditLogs(40),
-        fetchCollections(),
+        collectionsModuleEnabled ? fetchCollections() : Promise.resolve([]),
         fetchAdminSettings(),
-        fetchTagVocabulary(),
-        fetchTagProviders(),
+        aiTaggingModuleEnabled ? fetchTagVocabulary() : Promise.resolve([]),
+        aiTaggingModuleEnabled ? fetchTagProviders() : Promise.resolve({ providers: [] }),
       ]);
       setUsers(nextUsers);
       setSources(nextSources);
@@ -115,10 +126,10 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    if (user?.capabilities.can_view_admin) {
+    if (user?.capabilities.can_view_admin && !modulesLoading) {
       void load();
     }
-  }, [user?.capabilities.can_view_admin]);
+  }, [user?.capabilities.can_view_admin, modulesLoading, collectionsModuleEnabled, aiTaggingModuleEnabled]);
 
   const activeJobs = useMemo(
     () => jobs.filter((job) => job.status === "queued" || job.status === "running"),
@@ -144,7 +155,17 @@ export default function AdminPage() {
   };
 
   return (
-    <AppShell title="Admin Center" description="Manage users, sources, scans, maintenance, and audit activity in one place.">
+    <AppShell
+      title="Admin Center"
+      description="Manage users, sources, scans, maintenance, and audit activity in one place."
+      actions={
+        <div className="page-actions">
+          <Link href="/admin/modules" className="button subtle-button small-button">Modules</Link>
+          <Link href="/admin/health" className="button subtle-button small-button">Health</Link>
+          <Link href="/admin/integrations" className="button ghost-button small-button">Integrations</Link>
+        </div>
+      }
+    >
       {error ? <section className="panel empty-state">{error}</section> : null}
       {message ? <section className="panel empty-state">{message}</section> : null}
 
@@ -235,6 +256,10 @@ export default function AdminPage() {
             <p className="eyebrow">Source Management</p>
             <h2>Add approved root</h2>
           </div>
+          <p className="subdued">
+            In Docker, enter the container path, not the Windows host path.
+            Use a mounted path like <code>/data/sources/photos</code> and mirror the same bind mount in both backend and worker services.
+          </p>
           <label className="field">
             <span>Name</span>
             <input value={sourceName} onChange={(event) => setSourceName(event.target.value)} />
@@ -243,6 +268,11 @@ export default function AdminPage() {
             <span>Container-visible root path</span>
             <input value={sourceRootPath} onChange={(event) => setSourceRootPath(event.target.value)} />
           </label>
+          {looksLikeHostPath(sourceRootPath) ? (
+            <p className="subdued">
+              This looks like a Windows host path. In Docker, mount that folder first and then enter the Linux container path instead, such as <code>/data/sources/photos</code>.
+            </p>
+          ) : null}
           <button className="button" type="submit" disabled={busy === "create-source"}>
             {busy === "create-source" ? "Saving..." : "Save Source"}
           </button>
@@ -274,15 +304,16 @@ export default function AdminPage() {
             <p className="eyebrow">Collections</p>
             <h2>Create shared collection</h2>
           </div>
+          {!collectionsModuleEnabled ? <p className="subdued">The collections module is disabled. Enable it from Admin Modules to create shared collections.</p> : null}
           <label className="field">
             <span>Name</span>
-            <input value={collectionName} onChange={(event) => setCollectionName(event.target.value)} />
+            <input value={collectionName} onChange={(event) => setCollectionName(event.target.value)} disabled={!collectionsModuleEnabled} />
           </label>
           <label className="field">
             <span>Description</span>
-            <textarea value={collectionDescription} onChange={(event) => setCollectionDescription(event.target.value)} rows={3} />
+            <textarea value={collectionDescription} onChange={(event) => setCollectionDescription(event.target.value)} rows={3} disabled={!collectionsModuleEnabled} />
           </label>
-          <button className="button" type="submit" disabled={busy === "create-collection"}>
+          <button className="button" type="submit" disabled={busy === "create-collection" || !collectionsModuleEnabled}>
             {busy === "create-collection" ? "Creating..." : "Create Collection"}
           </button>
         </form>
@@ -356,6 +387,7 @@ export default function AdminPage() {
           <div className="chip-row">
             <span className="chip">{collections.length} collections</span>
             {settings ? <span className="chip">{settings.tag_similarity_threshold_percent}% threshold</span> : null}
+            {!collectionsModuleEnabled ? <span className="chip">collections module disabled</span> : null}
           </div>
         </section>
       </section>
@@ -682,6 +714,7 @@ export default function AdminPage() {
             <p className="eyebrow">AI Tagging</p>
             <h2>Providers and vocabulary</h2>
           </div>
+          {!aiTaggingModuleEnabled ? <p className="subdued">The AI tagging module is disabled. Enable it from Admin Modules to manage providers and vocabulary.</p> : null}
           <div className="list-stack compact-list-stack" style={{ maxHeight: "180px", overflowY: "auto" }}>
             {tagProviders.map((provider) => (
               <div key={provider.key} className="metadata-row">
@@ -710,7 +743,7 @@ export default function AdminPage() {
             <button
               className="button ghost-button small-button"
               type="button"
-              disabled={busy === "preload-taggers"}
+              disabled={busy === "preload-taggers" || !aiTaggingModuleEnabled}
               onClick={async () => {
                 setBusy("preload-taggers");
                 setError(null);
@@ -731,7 +764,7 @@ export default function AdminPage() {
             <button
               className="button small-button"
               type="button"
-              disabled={busy === "rebuild-ai-tags"}
+              disabled={busy === "rebuild-ai-tags" || !aiTaggingModuleEnabled}
               onClick={async () => {
                 setBusy("rebuild-ai-tags");
                 setError(null);
@@ -763,9 +796,9 @@ export default function AdminPage() {
             ))}
           </div>
           <div className="stack" style={{ gap: "0.5rem", marginTop: "1rem" }}>
-            <input className="input" placeholder="Tag Name" value={newTag} onChange={e => setNewTag(e.target.value)} />
-            <input className="input" placeholder="CLIP Prompt" value={newClipPrompt} onChange={e => setNewClipPrompt(e.target.value)} />
-            <button className="button small-button" onClick={async () => {
+            <input className="input" placeholder="Tag Name" value={newTag} onChange={e => setNewTag(e.target.value)} disabled={!aiTaggingModuleEnabled} />
+            <input className="input" placeholder="CLIP Prompt" value={newClipPrompt} onChange={e => setNewClipPrompt(e.target.value)} disabled={!aiTaggingModuleEnabled} />
+            <button className="button small-button" disabled={!aiTaggingModuleEnabled} onClick={async () => {
               setError(null);
               try {
                 await createTagVocabularyEntry({ tag: newTag, clip_prompt: newClipPrompt });
@@ -781,8 +814,8 @@ export default function AdminPage() {
           <div className="stack" style={{ gap: "0.5rem", marginTop: "1rem" }}>
             <p className="eyebrow">Related Tag Explorer</p>
             <div className="card-actions">
-              <input className="input" placeholder="Enter a tag to explore" value={relatedTagQuery} onChange={(event) => setRelatedTagQuery(event.target.value)} />
-              <button className="button small-button" onClick={async () => {
+              <input className="input" placeholder="Enter a tag to explore" value={relatedTagQuery} onChange={(event) => setRelatedTagQuery(event.target.value)} disabled={!aiTaggingModuleEnabled} />
+              <button className="button small-button" disabled={!aiTaggingModuleEnabled} onClick={async () => {
                 if (!relatedTagQuery.trim()) {
                   setRelatedTags([]);
                   return;

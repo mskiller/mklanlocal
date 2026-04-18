@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
-from media_indexer_backend.api.dependencies import get_session, require_authenticated, require_collection_manager
+from media_indexer_backend.api.dependencies import get_session, require_authenticated, require_collection_manager, require_enabled_module
 from media_indexer_backend.models.tables import User
 from media_indexer_backend.schemas.collection import (
     CollectionAssetAddRequest,
@@ -28,9 +28,10 @@ from media_indexer_backend.services.collection_service import (
     remove_asset_from_collection,
     update_collection,
 )
+from media_indexer_backend.services.webhook_service import dispatch_webhook_event
 
 
-router = APIRouter(prefix="/collections", tags=["collections"])
+router = APIRouter(prefix="/collections", tags=["collections"], dependencies=[Depends(require_enabled_module("collections"))])
 
 
 @router.get("", response_model=list[CollectionSummary])
@@ -57,6 +58,7 @@ def post_collection(
         details={"name": collection.name},
     )
     session.commit()
+    dispatch_webhook_event("collection.updated", {"collection_id": str(collection.id), "action": "created"})
     return collection_summary(collection, 0)
 
 
@@ -88,6 +90,7 @@ def patch_collection(
         details=payload.model_dump(exclude_none=True),
     )
     session.commit()
+    dispatch_webhook_event("collection.updated", {"collection_id": str(collection.id), "action": "updated"})
     return collection_summary(
         collection,
         get_collection_detail(session, collection.id, page=1, page_size=1).total,
@@ -110,6 +113,7 @@ def delete_collection_route(
         details={"name": collection.name},
     )
     session.commit()
+    dispatch_webhook_event("collection.updated", {"collection_id": str(collection.id), "action": "deleted"})
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -130,6 +134,7 @@ def post_collection_assets(
         details={"asset_ids": [str(asset_id) for asset_id in payload.asset_ids]},
     )
     session.commit()
+    dispatch_webhook_event("collection.updated", {"collection_id": str(collection_id), "action": "assets_add"})
     return detail
 
 
@@ -150,6 +155,7 @@ def post_collection_search_results(
         details=payload.model_dump(),
     )
     session.commit()
+    dispatch_webhook_event("collection.updated", {"collection_id": str(collection_id), "action": "search_results_add"})
     return detail
 
 
@@ -170,4 +176,5 @@ def delete_collection_asset(
         details={"asset_id": str(asset_id)},
     )
     session.commit()
+    dispatch_webhook_event("collection.updated", {"collection_id": str(collection_id), "action": "asset_remove"})
     return Response(status_code=status.HTTP_204_NO_CONTENT)

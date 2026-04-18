@@ -6,8 +6,10 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from media_indexer_backend.core.config import get_settings
+from media_indexer_backend.addons import models as addon_models  # noqa: F401
 from media_indexer_backend.db.base import Base
 from media_indexer_backend.models import tables  # noqa: F401
+from media_indexer_backend.platform.registry import ensure_runtime_import_paths, iter_backend_migration_locations
 
 
 config = context.config
@@ -18,6 +20,8 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+ensure_runtime_import_paths("backend")
+version_locations = iter_backend_migration_locations()
 
 
 def run_migrations_offline() -> None:
@@ -26,6 +30,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        version_locations=version_locations or None,
     )
 
     with context.begin_transaction():
@@ -40,7 +45,11 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            version_locations=version_locations or None,
+        )
 
         with context.begin_transaction():
             context.run_migrations()
@@ -50,4 +59,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-

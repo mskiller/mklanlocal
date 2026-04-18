@@ -2,6 +2,7 @@ from media_indexer_backend.models.enums import MatchType, MediaType, ReviewStatu
 from media_indexer_backend.models.tables import (
     Asset,
     AssetAnnotation,
+    CharacterCard,
     AssetMetadata,
     AssetSearch,
     AssetSimilarity,
@@ -21,6 +22,7 @@ from media_indexer_backend.models.tables import (
 __all__ = [
     "Asset",
     "AssetAnnotation",
+    "CharacterCard",
     "AssetMetadata",
     "AssetSearch",
     "AssetSimilarity",

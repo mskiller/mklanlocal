@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from media_indexer_backend.models.enums import MatchType, MediaType
+from media_indexer_backend.services.character_cards import character_card_search_fields, extract_character_card_from_raw_metadata
 
 
 SUPPORTED_IMAGE_EXTENSIONS = {
@@ -31,7 +32,7 @@ SUPPORTED_VIDEO_EXTENSIONS = {
     ".wmv",
     ".webm",
 }
-METADATA_SCHEMA_VERSION = 6
+METADATA_SCHEMA_VERSION = 7
 _TEXT_INPUT_KEYS = (
     "populated_text",
     "positive_prompt",
@@ -757,7 +758,7 @@ def _clean_prompt_tag(value: str) -> str | None:
     tag = _DANBOORU_WHITESPACE_RE.sub(" ", tag)
     tag = tag.strip(".,:_- ")
     tag = tag.replace(" ", "_")
-    if len(tag) < 2 or len(tag) > 96:
+    if len(tag) < 2 or len(tag) > 512:
         return None
     if tag in {"and", "or", "none", "n/a"}:
         return None
@@ -772,7 +773,9 @@ def canonicalize_tag(value: str | None) -> str | None:
         return cleaned
     fallback = value.strip().lower().replace(" ", "_")
     fallback = re.sub(r"_+", "_", fallback).strip("._-")
-    return fallback or None
+    if not fallback:
+        return None
+    return fallback[:1024]
 
 
 def extract_prompt_tags(prompt: str | None, limit: int = 48) -> list[str]:
@@ -920,6 +923,7 @@ def normalize_metadata(
         "color_profile": first_value(exif.get("ProfileDescription"), video_stream.get("color_space")),
     }
     normalized.update(_extract_generation_metadata(exif))
+    normalized.update(character_card_search_fields(extract_character_card_from_raw_metadata(exif)))
     normalized["prompt_tags"] = extract_prompt_tags(normalized.get("prompt"))
     normalized["prompt_tag_string"] = prompt_tag_string(normalized["prompt_tags"])
 

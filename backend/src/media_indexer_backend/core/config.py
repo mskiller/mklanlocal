@@ -30,10 +30,12 @@ class Settings(BaseSettings):
     allowed_source_roots: str = "/data/sources"
     upload_source_name: str = "upload"
     upload_source_root: str = "/data/sources/upload"
+    worker_status_url: str = "http://worker:9000"
     preview_root: str = "/workspace/storage/previews"
     access_token_ttl_seconds: int = 60 * 60 * 24
     cookie_secure: bool = False
     worker_poll_interval_seconds: int = 5
+    worker_status_port: int = 9000
     max_thumbnail_size: int = 512
     deepzoom_tile_size: int = 256
     deepzoom_tile_overlap: int = 0
@@ -65,6 +67,18 @@ class Settings(BaseSettings):
     caption_device: str = "auto"
     ocr_enabled: bool = True
     ocr_max_characters: int = 6000
+    inbox_enabled: bool = True
+    inbox_path: str = "/data/sources/upload"
+    inbox_default_target_source: str = "/data/sources/sample"
+    inbox_auto_approve: bool = False
+    face_detection_enabled: bool = False
+    face_min_size: int = 40
+    face_recognition_threshold: float = 0.5
+    face_detector_model_id: str = "opencv/face_detection_yunet"
+    face_embedder_model_id: str = "opencv/face_recognition_sface"
+    smart_album_suggestion_min_events: int = 5
+    smart_album_suggestion_min_assets: int = 8
+    smart_album_suggestion_lookback_days: int = 90
 
     @property
     def allowed_source_root_paths(self) -> list[Path]:
@@ -77,6 +91,10 @@ class Settings(BaseSettings):
     @property
     def preview_root_path(self) -> Path:
         return Path(self.preview_root).resolve(strict=False)
+
+    @property
+    def inbox_path_root(self) -> Path:
+        return Path(self.inbox_path).resolve(strict=False)
 
     @property
     def model_cache_root_path(self) -> Path:

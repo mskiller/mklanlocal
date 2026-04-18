@@ -88,7 +88,8 @@ export default function AdminGroupsPage() {
             </label>
             <p className="subdued" style={{ fontSize: "0.8em" }}>
               Keys: <code>can_manage_sources</code>, <code>can_run_scans</code>, <code>can_upload_assets</code>,{" "}
-              <code>can_manage_collections</code>, <code>can_review_compare</code>,{" "}
+              <code>can_manage_collections</code>, <code>can_review_compare</code>, <code>can_curate_assets</code>,{" "}
+              <code>can_manage_shares</code>, <code>can_manage_smart_albums</code>,{" "}
               <code>allowed_source_ids</code> (<code>"all"</code> or <code>["uuid",…]</code>)
             </p>
             <div className="card-actions">

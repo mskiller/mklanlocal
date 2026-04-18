@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from media_indexer_backend.api.dependencies import get_session, require_admin, require_authenticated, require_upload_access
 from media_indexer_backend.models.tables import ScanJob, User
 from media_indexer_backend.models.enums import MediaType, ScanStatus
+from media_indexer_backend.schemas.image_ops import CropSpec
 from media_indexer_backend.schemas.scan_job import ScanJobRead
 from media_indexer_backend.schemas.source import SourceBrowseInspect, SourceBrowseResponse, SourceCreate, SourceRead, SourceTreeResponse, SourceUploadRead
 from media_indexer_backend.services.audit import record_audit_event
@@ -25,6 +26,7 @@ from media_indexer_backend.services.source_service import (
     inspect_source_entry,
     list_sources,
     source_read_for_user,
+    upload_edited_image_to_source,
     upload_images_to_source,
 )
 
@@ -164,21 +166,6 @@ def upload_source_images(
 ) -> SourceUploadRead:
     get_source_or_404(session, source_id, current_user=current_user)
     payload = upload_images_to_source(session, source_id, folder=folder, files=files)
-    active_job = session.execute(
-        select(ScanJob).where(
-            ScanJob.source_id == source_id,
-            ScanJob.status.in_([ScanStatus.QUEUED, ScanStatus.RUNNING]),
-        )
-    ).scalar_one_or_none()
-    if active_job:
-        payload.scan_job_id = active_job.id
-    else:
-        try:
-            payload.scan_job_id = queue_scan(session, source_id).id
-        except HTTPException as exc:
-            if exc.status_code != status.HTTP_409_CONFLICT:
-                raise
-
     record_audit_event(
         session,
         actor=current_user.username,
@@ -186,6 +173,50 @@ def upload_source_images(
         resource_type="source",
         resource_id=source_id,
         details={"folder": payload.folder, "uploaded_files": payload.uploaded_files},
+    )
+    session.commit()
+    return payload
+
+
+@router.post("/{source_id}/upload-edited", response_model=SourceUploadRead)
+def upload_source_edited_image(
+    source_id: UUID,
+    file: UploadFile = File(...),
+    folder: str | None = Form(default=None),
+    rotation_quadrants: int = Form(default=0),
+    crop_x: int = Form(...),
+    crop_y: int = Form(...),
+    crop_width: int = Form(...),
+    crop_height: int = Form(...),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_upload_access),
+) -> SourceUploadRead:
+    get_source_or_404(session, source_id, current_user=current_user)
+    crop_spec = CropSpec(
+        rotation_quadrants=rotation_quadrants,
+        crop_x=crop_x,
+        crop_y=crop_y,
+        crop_width=crop_width,
+        crop_height=crop_height,
+    )
+    payload = upload_edited_image_to_source(
+        session,
+        source_id,
+        folder=folder,
+        file=file,
+        crop_spec=crop_spec,
+    )
+    record_audit_event(
+        session,
+        actor=current_user.username,
+        action="source.upload_edited",
+        resource_type="source",
+        resource_id=source_id,
+        details={
+            "folder": payload.folder,
+            "uploaded_files": payload.uploaded_files,
+            **crop_spec.model_dump(),
+        },
     )
     session.commit()
     return payload

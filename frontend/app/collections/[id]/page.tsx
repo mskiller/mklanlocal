@@ -4,12 +4,13 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
+import { AddonQuickActions } from "@/components/addon-quick-actions";
 import { AppShell } from "@/components/app-shell";
 import { CompareSelectionTray } from "@/components/compare-selection-tray";
 import { GalleryTile } from "@/components/gallery-tile";
 import { ImageExplorerOverlay } from "@/components/image-explorer-overlay";
 import { useAuth } from "@/components/auth-provider";
-import { deleteCollection, fetchCollection, mediaUrl, removeAssetFromCollection, updateCollection } from "@/lib/api";
+import { createAssetCropDraft, deleteCollection, fetchCollection, mediaUrl, removeAssetFromCollection, updateCollection } from "@/lib/api";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { CollectionDetail } from "@/lib/types";
 
@@ -67,6 +68,7 @@ export default function CollectionDetailPage() {
   const explorerItems =
     collection?.items.map((item) => ({
       key: item.id,
+      assetId: item.id,
       title: item.filename,
       subtitle: [item.source_name, item.generator].filter(Boolean).join(" · ") || undefined,
       promptExcerpt: item.prompt_excerpt,
@@ -77,6 +79,8 @@ export default function CollectionDetailPage() {
       detailHref: `/assets/${item.id}`,
       similarHref: `/assets/${item.id}/similar`,
       sourceContext: item.relative_path,
+      width: item.width,
+      height: item.height,
       metadataSummary: [
         ...(item.width && item.height ? [{ label: "Dimensions", value: `${item.width} x ${item.height}` }] : []),
         { label: "Source", value: item.source_name },
@@ -108,6 +112,17 @@ export default function CollectionDetailPage() {
             activeIndex={explorerIndex ?? 0}
             onClose={() => setExplorerIndex(null)}
             onActiveIndexChange={(next) => setExplorerIndex(next)}
+            onCreateCropDraft={
+              user?.capabilities.can_upload_assets
+                ? async (item, crop) => {
+                    if (!item.assetId) {
+                      return;
+                    }
+                    await createAssetCropDraft(item.assetId, { folder: "explorer-crops", ...crop });
+                  }
+                : undefined
+            }
+            renderActions={(item) => <AddonQuickActions assetId={item.assetId ?? undefined} />}
           />
           <CompareSelectionTray
             selectionMode={selectionMode}
@@ -184,6 +199,7 @@ export default function CollectionDetailPage() {
                 <p className="eyebrow">Collection Gallery</p>
                 <h2>{collection.total} images</h2>
               </div>
+              <AddonQuickActions collectionId={collection.id} title="Collection Addons" />
             </div>
             <div className="gallery-grid">
               {collection.items.map((item) => {

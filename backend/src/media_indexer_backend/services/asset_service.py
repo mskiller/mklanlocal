@@ -85,6 +85,7 @@ def _is_workflow_export_available(asset: Asset) -> bool:
 
 def _asset_summary(asset: Asset, user_id: UUID | None = None) -> AssetSummary:
     normalized = normalized_metadata_for_api(asset.metadata_record.normalized_json if asset.metadata_record else {})
+    preview_url = f"/assets/{asset.id}/preview" if asset.preview_path or asset.media_type == MediaType.IMAGE else None
     return AssetSummary(
         id=asset.id,
         source_id=asset.source_id,
@@ -97,7 +98,7 @@ def _asset_summary(asset: Asset, user_id: UUID | None = None) -> AssetSummary:
         modified_at=asset.modified_at,
         created_at=asset.created_at,
         indexed_at=asset.indexed_at,
-        preview_url=f"/assets/{asset.id}/preview" if asset.preview_path else None,
+        preview_url=preview_url,
         content_url=f"/assets/{asset.id}/content",
         blur_hash=asset.blur_hash,
         deepzoom_available=False,
@@ -110,6 +111,8 @@ def _asset_summary(asset: Asset, user_id: UUID | None = None) -> AssetSummary:
         ocr_confidence=float(normalized["ocr_confidence"]) if isinstance(normalized.get("ocr_confidence"), (float, int)) else None,
         annotation=_annotation_for_asset(asset, user_id),
         workflow_export_available=_is_workflow_export_available(asset),
+        waveform_url=f"/assets/{asset.id}/preview?variant=waveform" if asset.waveform_preview_path else None,
+        video_keyframes=[f"/assets/{asset.id}/preview?variant=keyframe&index={index}" for index, _ in enumerate(asset.video_keyframes or [])] or None,
     )
 
 
@@ -117,13 +120,14 @@ def asset_browse_item(asset: Asset, user_id: UUID | None = None) -> AssetBrowseI
     normalized = normalized_metadata_for_api(asset.metadata_record.normalized_json if asset.metadata_record else {})
     tags = prompt_tags_from_normalized(normalized)
     workflow_available = _is_workflow_export_available(asset)
+    preview_url = f"/assets/{asset.id}/preview" if asset.preview_path or asset.media_type == MediaType.IMAGE else None
     return AssetBrowseItem(
         id=asset.id,
         source_id=asset.source_id,
         source_name=asset.source.name,
         filename=asset.filename,
         relative_path=asset.relative_path,
-        preview_url=f"/assets/{asset.id}/preview" if asset.preview_path else None,
+        preview_url=preview_url,
         content_url=f"/assets/{asset.id}/content",
         blur_hash=asset.blur_hash,
         deepzoom_available=False,
@@ -141,6 +145,9 @@ def asset_browse_item(asset: Asset, user_id: UUID | None = None) -> AssetBrowseI
         ocr_text=normalized.get("ocr_text") if isinstance(normalized.get("ocr_text"), str) else None,
         annotation=_annotation_for_asset(asset, user_id),
         workflow_export_available=workflow_available,
+        media_type=asset.media_type,
+        waveform_url=f"/assets/{asset.id}/preview?variant=waveform" if asset.waveform_preview_path else None,
+        video_keyframes=[f"/assets/{asset.id}/preview?variant=keyframe&index={index}" for index, _ in enumerate(asset.video_keyframes or [])] or None,
     )
 
 
@@ -194,6 +201,7 @@ def _apply_search_filters(
     height_max: int | None,
     duration_min: float | None,
     duration_max: float | None,
+    has_gps: bool | None,
     tags: list[str],
     auto_tags: list[str] | None,
     exclude_tags: list[str] | None,
@@ -230,6 +238,9 @@ def _apply_search_filters(
         conditions.append(cast(normalized["duration_seconds"].astext, Float) >= duration_min)
     if duration_max is not None:
         conditions.append(cast(normalized["duration_seconds"].astext, Float) <= duration_max)
+    if has_gps is True:
+        conditions.append(normalized["gps_latitude"].astext.is_not(None))
+        conditions.append(normalized["gps_longitude"].astext.is_not(None))
     if min_rating is not None and annotation_alias is not None:
         conditions.append(annotation_alias.rating >= min_rating)
     if review_status is not None and annotation_alias is not None:
@@ -285,6 +296,7 @@ def search_assets(
     height_max: int | None,
     duration_min: float | None,
     duration_max: float | None,
+    has_gps: bool | None,
     tags: list[str],
     auto_tags: list[str] | None = None,
     exclude_tags: list[str] | None = None,
@@ -327,6 +339,7 @@ def search_assets(
         height_max=height_max,
         duration_min=duration_min,
         duration_max=duration_max,
+        has_gps=has_gps,
         tags=tags,
         auto_tags=auto_tags,
         exclude_tags=exclude_tags,
@@ -350,6 +363,7 @@ def search_assets(
         height_max=height_max,
         duration_min=duration_min,
         duration_max=duration_max,
+        has_gps=has_gps,
         tags=tags,
         auto_tags=auto_tags,
         exclude_tags=exclude_tags,
@@ -361,6 +375,8 @@ def search_assets(
 
     if sort == "created_at":
         base_query = base_query.order_by(desc(Asset.created_at), Asset.filename)
+    elif sort == "indexed_at":
+        base_query = base_query.order_by(desc(Asset.indexed_at), desc(Asset.modified_at), Asset.filename)
     elif sort == "modified_at":
         base_query = base_query.order_by(desc(Asset.modified_at), Asset.filename)
     elif sort == "filename":
@@ -394,6 +410,7 @@ def matching_asset_ids_for_search(
     height_max: int | None,
     duration_min: float | None,
     duration_max: float | None,
+    has_gps: bool | None,
     tags: list[str],
     auto_tags: list[str] | None = None,
     exclude_tags: list[str] | None = None,
@@ -422,6 +439,7 @@ def matching_asset_ids_for_search(
         height_max=height_max,
         duration_min=duration_min,
         duration_max=duration_max,
+        has_gps=has_gps,
         tags=tags,
         auto_tags=auto_tags,
         exclude_tags=exclude_tags,
@@ -487,6 +505,8 @@ def browse_assets(
 
     if sort == "created_at":
         base_query = base_query.order_by(desc(Asset.created_at), desc(Asset.modified_at), Asset.filename)
+    elif sort == "indexed_at":
+        base_query = base_query.order_by(desc(Asset.indexed_at), desc(Asset.modified_at), Asset.filename)
     elif sort == "filename":
         base_query = base_query.order_by(Asset.filename, desc(Asset.modified_at))
     elif sort == "rating" and annotation_alias is not None:
@@ -536,6 +556,7 @@ def get_assets_for_tag(session: Session, tag: str, page: int, page_size: int, cu
         height_max=None,
         duration_min=None,
         duration_max=None,
+        has_gps=None,
         tags=[tag],
         auto_tags=None,
         exclude_tags=None,

@@ -49,6 +49,8 @@ class Source(Base):
 
     assets: Mapped[list["Asset"]] = relationship(back_populates="source", cascade="all, delete-orphan")
     scan_jobs: Mapped[list["ScanJob"]] = relationship(back_populates="source", cascade="all, delete-orphan")
+    scheduled_scans: Mapped[list["ScheduledScan"]] = relationship(back_populates="source", cascade="all, delete-orphan")
+    inbox_items: Mapped[list["InboxItem"]] = relationship(back_populates="target_source")
 
 
 class User(Base):
@@ -77,6 +79,9 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    api_tokens: Mapped[list["ApiToken"]] = relationship(back_populates="created_by_user")
+    reviewed_inbox_items: Mapped[list["InboxItem"]] = relationship(back_populates="reviewed_by_user")
+    smart_albums: Mapped[list["SmartAlbum"]] = relationship(back_populates="owner")
 
 
 class ScanJob(Base):
@@ -118,6 +123,8 @@ class Asset(Base):
     indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     preview_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     blur_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    waveform_preview_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    video_keyframes: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     
     # Visual Workflow Extraction (v1.8 Expansion)
     visual_workflow_json: Mapped[dict | list | None] = mapped_column(JSONB, nullable=True)
@@ -126,6 +133,11 @@ class Asset(Base):
 
     source: Mapped[Source] = relationship(back_populates="assets")
     metadata_record: Mapped["AssetMetadata | None"] = relationship(
+        back_populates="asset",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    character_card: Mapped["CharacterCard | None"] = relationship(
         back_populates="asset",
         cascade="all, delete-orphan",
         uselist=False,
@@ -149,6 +161,10 @@ class Asset(Base):
         back_populates="asset",
         cascade="all, delete-orphan",
     )
+    faces: Mapped[list["FaceDetection"]] = relationship(
+        back_populates="asset",
+        cascade="all, delete-orphan",
+    )
 
 
 class AssetMetadata(Base):
@@ -162,11 +178,28 @@ class AssetMetadata(Base):
     asset: Mapped[Asset] = relationship(back_populates="metadata_record")
 
 
+class CharacterCard(Base):
+    __tablename__ = "character_cards"
+
+    asset_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    creator: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    spec: Mapped[str] = mapped_column(String(64), default="chara_card_v3")
+    spec_version: Mapped[str] = mapped_column(String(32), default="3.0")
+    tags_json: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    card_json: Mapped[dict] = mapped_column(JSONB)
+    extracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    asset: Mapped[Asset] = relationship(back_populates="character_card")
+
+
 class AssetTag(Base):
     __tablename__ = "asset_tags"
 
     asset_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), primary_key=True)
-    tag: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tag: Mapped[str] = mapped_column(String(1024), primary_key=True)
 
     asset: Mapped[Asset] = relationship(back_populates="tags")
 
@@ -286,6 +319,160 @@ class AppSetting(Base):
     key: Mapped[str] = mapped_column(String(255), primary_key=True)
     value_json: Mapped[dict] = mapped_column(JSONB, default=dict)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class PlatformModule(Base):
+    __tablename__ = "platform_modules"
+
+    module_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[str] = mapped_column(String(32), default="builtin")
+    version: Mapped[str] = mapped_column(String(64), default="0.0.0")
+    source_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    settings_json: Mapped[dict] = mapped_column(JSONB, default=dict)
+    installed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ScheduledScan(Base):
+    __tablename__ = "scheduled_scans"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    source_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"), index=True)
+    cron_expression: Mapped[str] = mapped_column(String(64))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("scan_jobs.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    source: Mapped["Source"] = relationship(back_populates="scheduled_scans")
+
+
+class WebhookEndpoint(Base):
+    __tablename__ = "webhook_endpoints"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    url: Mapped[str] = mapped_column(Text)
+    secret: Mapped[str] = mapped_column(Text)
+    events: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class ApiToken(Base):
+    __tablename__ = "api_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255))
+    token_prefix: Mapped[str] = mapped_column(String(32), index=True)
+    token_hash: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    created_by_user: Mapped["User"] = relationship(back_populates="api_tokens")
+
+
+class InboxItem(Base):
+    __tablename__ = "inbox_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    filename: Mapped[str] = mapped_column(String(255))
+    inbox_path: Mapped[str] = mapped_column(Text, unique=True)
+    file_size: Mapped[int] = mapped_column(BigInteger)
+    phash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    clip_distance_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    nearest_asset_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("assets.id", ondelete="SET NULL"), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    target_source_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sources.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    target_source: Mapped["Source | None"] = relationship(back_populates="inbox_items")
+    reviewed_by_user: Mapped["User | None"] = relationship(back_populates="reviewed_inbox_items")
+    nearest_asset: Mapped["Asset | None"] = relationship(foreign_keys=[nearest_asset_id])
+
+
+class FacePerson(Base):
+    __tablename__ = "face_people"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cover_face_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("face_detections.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    faces: Mapped[list["FaceDetection"]] = relationship(
+        back_populates="person",
+        foreign_keys="FaceDetection.person_id",
+    )
+    cover_face: Mapped["FaceDetection | None"] = relationship(
+        foreign_keys=[cover_face_id],
+        post_update=True,
+    )
+
+
+class FaceDetection(Base):
+    __tablename__ = "face_detections"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    asset_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
+    person_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("face_people.id", ondelete="SET NULL"), nullable=True)
+    bbox_x1: Mapped[int] = mapped_column(Integer)
+    bbox_y1: Mapped[int] = mapped_column(Integer)
+    bbox_x2: Mapped[int] = mapped_column(Integer)
+    bbox_y2: Mapped[int] = mapped_column(Integer)
+    det_score: Mapped[float] = mapped_column(Float)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(512), nullable=True)
+    crop_preview_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    asset: Mapped["Asset"] = relationship(back_populates="faces")
+    person: Mapped["FacePerson | None"] = relationship(
+        back_populates="faces",
+        foreign_keys=[person_id],
+    )
+
+
+class SmartAlbum(Base):
+    __tablename__ = "smart_albums"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rule_json: Mapped[dict] = mapped_column(JSONB, default=dict)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    asset_count: Mapped[int] = mapped_column(Integer, default=0)
+    cover_asset_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("assets.id", ondelete="SET NULL"), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="user")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    degraded_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    owner: Mapped["User"] = relationship(back_populates="smart_albums")
+
+
+class CurationEvent(Base):
+    __tablename__ = "curation_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    asset_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[str] = mapped_column(String(255), index=True)
+    details_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
 class AuditLog(Base):

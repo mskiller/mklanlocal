@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
 
 import { useAuth } from "@/components/auth-provider";
+import { useModuleRegistry } from "@/components/module-registry-provider";
 import { useSettings } from "@/components/settings-provider";
 
 function BackButton({ className = "" }: { className?: string }) {
@@ -38,6 +39,7 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, logout } = useAuth();
+  const { visibleUserModules } = useModuleRegistry();
   const { nsfwVisible, setNsfwVisible } = useSettings();
   const [navOpen, setNavOpen] = useState(false);
   const [desktopNavCollapsed, setDesktopNavCollapsed] = useState(false);
@@ -88,25 +90,34 @@ export function AppShell({
     );
   }
 
+  const moduleNavItems = visibleUserModules
+    .filter((item) => item.enabled && item.status === "active" && item.nav_href && item.nav_label)
+    .map((item) => ({
+      href: item.nav_href as string,
+      label: item.nav_label as string,
+      order: item.nav_order,
+    }))
+    .sort((left, right) => left.order - right.order || left.label.localeCompare(right.label));
+
   const navItems = [
-    { href: "/", label: "Dashboard" },
-    { href: "/sources", label: "Sources" },
-    { href: "/browse-indexed", label: "Browse Indexed" },
-    { href: "/search", label: "Search" },
-    { href: "/collections", label: "Collections" },
-    { href: "/timeline", label: "Timeline" },
-    ...(user.capabilities.can_upload_assets ? [{ href: "/upload", label: "Upload" }] : []),
-    { href: "/scan-jobs", label: "Scan Jobs" },
-    ...(user.capabilities.can_view_admin ? [{ href: "/admin", label: "Admin" }] : []),
-    { href: "/profile", label: "Profile" },
+    { href: "/", label: "Dashboard", order: 0 },
+    { href: "/sources", label: "Sources", order: 10 },
+    { href: "/browse-indexed", label: "Browse Indexed", order: 20 },
+    { href: "/search", label: "Search", order: 30 },
+    ...moduleNavItems,
+    ...(user.capabilities.can_upload_assets ? [{ href: "/inbox", label: "Inbox", order: 90 }] : []),
+    ...(user.capabilities.can_upload_assets ? [{ href: "/upload", label: "Upload", order: 100 }] : []),
+    { href: "/scan-jobs", label: "Scan Jobs", order: 110 },
+    ...(user.capabilities.can_view_admin ? [{ href: "/admin", label: "Admin", order: 120 }] : []),
+    { href: "/profile", label: "Profile", order: 130 },
   ];
+  const mobileModuleItems = moduleNavItems.slice(0, 3).map((item) => ({ href: item.href, label: item.label }));
   const mobileItems = [
     { href: "/", label: "Home" },
     { href: "/sources", label: "Sources" },
     { href: "/browse-indexed", label: "Indexed" },
     { href: "/search", label: "Search" },
-    { href: "/collections", label: "Collections" },
-    { href: "/timeline", label: "Timeline" },
+    ...mobileModuleItems,
   ];
 
   const isActive = (href: string) => {

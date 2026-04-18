@@ -53,6 +53,8 @@ class AssetSummary(BaseModel):
     ocr_confidence: float | None = None
     annotation: AssetAnnotationRead | None = None
     workflow_export_available: bool = False
+    waveform_url: str | None = None
+    video_keyframes: list[str] | None = None
 
 
 class AssetDetail(AssetSummary):
@@ -96,6 +98,9 @@ class AssetBrowseItem(BaseModel):
     ocr_text: str | None = None
     annotation: AssetAnnotationRead | None = None
     workflow_export_available: bool = False
+    media_type: MediaType = MediaType.UNKNOWN
+    waveform_url: str | None = None
+    video_keyframes: list[str] | None = None
 
 
 class AssetBrowseResponse(BaseModel):

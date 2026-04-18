@@ -1,0 +1,68 @@
+id = "export_recipes"
+name = "Export Recipes"
+version = "0.1.0"
+description = "Run reusable export presets for web shares, overlays, and collection contact sheets."
+platform_api_version = "1"
+enabled_by_default = false
+permissions = ["export_recipes.read", "export_recipes.write"]
+dependencies = ["collections"]
+
+[entrypoints]
+backend = "mklan_addon_export_recipes.backend:register"
+worker = "mklan_addon_export_recipes.worker:register"
+frontend = "mklan-addon-export-recipes"
+
+[contributions]
+api_mount = "/modules/export_recipes"
+user_mount = "/modules/export_recipes"
+admin_mount = "/admin/modules/export_recipes"
+nav_label = "Export Recipes"
+nav_href = "/modules/export_recipes"
+nav_order = 80
+admin_nav_label = "Export Recipes"
+admin_nav_href = "/admin/modules/export_recipes"
+admin_nav_order = 80
+user_visible = true
+admin_visible = true
+
+[[settings.fields]]
+key = "backend"
+label = "Backend"
+type = "string"
+default = "pillow-exporter"
+description = "Execution backend label surfaced in the admin console."
+
+[[settings.fields]]
+key = "device"
+label = "Device"
+type = "string"
+default = "cpu"
+description = "Reserved for future worker-backed export engines."
+
+[[settings.fields]]
+key = "output_format"
+label = "Output Format"
+type = "string"
+default = "webp"
+description = "Default output format used for named export recipes."
+
+[[settings.fields]]
+key = "max_input_size"
+label = "Max Input Size"
+type = "integer"
+default = 4096
+description = "Largest input dimension processed before export."
+
+[[settings.fields]]
+key = "concurrency"
+label = "Concurrency"
+type = "integer"
+default = 2
+description = "Reserved queue concurrency for future worker-backed execution."
+
+[[settings.fields]]
+key = "retention_policy"
+label = "Retention Policy"
+type = "string"
+default = "keep-history"
+description = "How exported recipe artifacts should be retained."

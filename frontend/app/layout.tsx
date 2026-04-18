@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 
 import { AuthProvider } from "@/components/auth-provider";
+import { ModuleRegistryProvider } from "@/components/module-registry-provider";
 import { SettingsProvider } from "@/components/settings-provider";
 import { ToastProvider } from "@/components/use-toast";
 import { ToastContainer } from "@/components/ToastContainer";
 
+import "cropperjs/dist/cropper.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -18,7 +20,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body>
         <SettingsProvider>
           <ToastProvider>
-            <AuthProvider>{children}</AuthProvider>
+            <AuthProvider>
+              <ModuleRegistryProvider>{children}</ModuleRegistryProvider>
+            </AuthProvider>
             <ToastContainer />
           </ToastProvider>
         </SettingsProvider>

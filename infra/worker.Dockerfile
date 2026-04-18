@@ -13,6 +13,7 @@ RUN apt-get update \
         ffmpeg \
         libgl1 \
         libglib2.0-0 \
+        libvips42 \
         tesseract-ocr \
         tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
@@ -32,4 +33,3 @@ RUN pip install --no-cache-dir -e /workspace/worker
 WORKDIR /workspace/worker
 
 CMD python -m media_indexer_worker.main
-

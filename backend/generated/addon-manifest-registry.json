@@ -1,0 +1,353 @@
+{
+  "platform_api_version": "1",
+  "generated_at": "2026-04-18T21:41:28.081447+00:00",
+  "addons": [
+    {
+      "id": "metadata_privacy",
+      "name": "Metadata Privacy",
+      "version": "0.1.0",
+      "description": "Inspect, strip, and selectively preserve metadata for share-safe derivatives.",
+      "platform_api_version": "1",
+      "source_ref": "vendored://metadata_privacy@0.1.0",
+      "dependencies": [],
+      "permissions": [
+        "metadata_privacy.read",
+        "metadata_privacy.write"
+      ],
+      "backend_entrypoint": "mklan_addon_metadata_privacy.backend:register",
+      "worker_entrypoint": "mklan_addon_metadata_privacy.worker:register",
+      "frontend_entrypoint": "mklan-addon-metadata-privacy",
+      "backend_migrations": null,
+      "api_mount": "/modules/metadata_privacy",
+      "user_mount": "/modules/metadata_privacy",
+      "admin_mount": "/admin/modules/metadata_privacy",
+      "nav_label": "Metadata Privacy",
+      "nav_href": "/modules/metadata_privacy",
+      "admin_nav_label": "Metadata Privacy",
+      "admin_nav_href": "/admin/modules/metadata_privacy",
+      "settings_schema": [
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "string",
+          "description": "Execution backend label surfaced in the admin console.",
+          "default": "pillow-sanitizer"
+        },
+        {
+          "key": "device",
+          "label": "Device",
+          "type": "string",
+          "description": "Reserved for future metadata backends.",
+          "default": "cpu"
+        },
+        {
+          "key": "output_format",
+          "label": "Output Format",
+          "type": "string",
+          "description": "Output format used for sanitized derivatives.",
+          "default": "png"
+        },
+        {
+          "key": "max_input_size",
+          "label": "Max Input Size",
+          "type": "integer",
+          "description": "Largest input dimension processed before export.",
+          "default": 4096
+        },
+        {
+          "key": "concurrency",
+          "label": "Concurrency",
+          "type": "integer",
+          "description": "Reserved queue concurrency for future worker-backed execution.",
+          "default": 2
+        },
+        {
+          "key": "retention_policy",
+          "label": "Retention Policy",
+          "type": "string",
+          "description": "How sanitized exports and reports are retained.",
+          "default": "keep-latest"
+        }
+      ],
+      "manifest_path": "F:\\MklanLocal-Github\\mklanlocal - modular\\addons\\metadata-privacy\\mklan-addon.toml"
+    },
+    {
+      "id": "export_recipes",
+      "name": "Export Recipes",
+      "version": "0.1.0",
+      "description": "Run reusable export presets for web shares, overlays, and collection contact sheets.",
+      "platform_api_version": "1",
+      "source_ref": "vendored://export_recipes@0.1.0",
+      "dependencies": [
+        "collections"
+      ],
+      "permissions": [
+        "export_recipes.read",
+        "export_recipes.write"
+      ],
+      "backend_entrypoint": "mklan_addon_export_recipes.backend:register",
+      "worker_entrypoint": "mklan_addon_export_recipes.worker:register",
+      "frontend_entrypoint": "mklan-addon-export-recipes",
+      "backend_migrations": null,
+      "api_mount": "/modules/export_recipes",
+      "user_mount": "/modules/export_recipes",
+      "admin_mount": "/admin/modules/export_recipes",
+      "nav_label": "Export Recipes",
+      "nav_href": "/modules/export_recipes",
+      "admin_nav_label": "Export Recipes",
+      "admin_nav_href": "/admin/modules/export_recipes",
+      "settings_schema": [
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "string",
+          "description": "Execution backend label surfaced in the admin console.",
+          "default": "pillow-exporter"
+        },
+        {
+          "key": "device",
+          "label": "Device",
+          "type": "string",
+          "description": "Reserved for future worker-backed export engines.",
+          "default": "cpu"
+        },
+        {
+          "key": "output_format",
+          "label": "Output Format",
+          "type": "string",
+          "description": "Default output format used for named export recipes.",
+          "default": "webp"
+        },
+        {
+          "key": "max_input_size",
+          "label": "Max Input Size",
+          "type": "integer",
+          "description": "Largest input dimension processed before export.",
+          "default": 4096
+        },
+        {
+          "key": "concurrency",
+          "label": "Concurrency",
+          "type": "integer",
+          "description": "Reserved queue concurrency for future worker-backed execution.",
+          "default": 2
+        },
+        {
+          "key": "retention_policy",
+          "label": "Retention Policy",
+          "type": "string",
+          "description": "How exported recipe artifacts should be retained.",
+          "default": "keep-history"
+        }
+      ],
+      "manifest_path": "F:\\MklanLocal-Github\\mklanlocal - modular\\addons\\export-recipes\\mklan-addon.toml"
+    },
+    {
+      "id": "background_removal",
+      "name": "Background Removal",
+      "version": "0.1.0",
+      "description": "Generate transparent cutouts and alpha masks from indexed images.",
+      "platform_api_version": "1",
+      "source_ref": "vendored://background_removal@0.1.0",
+      "dependencies": [],
+      "permissions": [
+        "background_removal.read",
+        "background_removal.write"
+      ],
+      "backend_entrypoint": "mklan_addon_background_removal.backend:register",
+      "worker_entrypoint": "mklan_addon_background_removal.worker:register",
+      "frontend_entrypoint": "mklan-addon-background-removal",
+      "backend_migrations": null,
+      "api_mount": "/modules/background_removal",
+      "user_mount": "/modules/background_removal",
+      "admin_mount": "/admin/modules/background_removal",
+      "nav_label": "Background Removal",
+      "nav_href": "/modules/background_removal",
+      "admin_nav_label": "Background Removal",
+      "admin_nav_href": "/admin/modules/background_removal",
+      "settings_schema": [
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "string",
+          "description": "Execution backend label surfaced in the admin console.",
+          "default": "pillow-matte"
+        },
+        {
+          "key": "device",
+          "label": "Device",
+          "type": "string",
+          "description": "Reserved for future GPU-backed cutout engines.",
+          "default": "cpu"
+        },
+        {
+          "key": "output_format",
+          "label": "Output Format",
+          "type": "string",
+          "description": "Transparent output format for generated cutouts.",
+          "default": "png"
+        },
+        {
+          "key": "max_input_size",
+          "label": "Max Input Size",
+          "type": "integer",
+          "description": "Largest input dimension processed before downscaling.",
+          "default": 4096
+        },
+        {
+          "key": "concurrency",
+          "label": "Concurrency",
+          "type": "integer",
+          "description": "Reserved queue concurrency for future worker-backed execution.",
+          "default": 2
+        },
+        {
+          "key": "retention_policy",
+          "label": "Retention Policy",
+          "type": "string",
+          "description": "How generated cutouts should be retained.",
+          "default": "keep-latest"
+        }
+      ],
+      "manifest_path": "F:\\MklanLocal-Github\\mklanlocal - modular\\addons\\background-removal\\mklan-addon.toml"
+    },
+    {
+      "id": "upscale_restore",
+      "name": "Upscale + Restore",
+      "version": "0.1.0",
+      "description": "Create cached x2/x4 upscale derivatives with light denoise and sharpening.",
+      "platform_api_version": "1",
+      "source_ref": "vendored://upscale_restore@0.1.0",
+      "dependencies": [],
+      "permissions": [
+        "upscale_restore.read",
+        "upscale_restore.write"
+      ],
+      "backend_entrypoint": "mklan_addon_upscale_restore.backend:register",
+      "worker_entrypoint": "mklan_addon_upscale_restore.worker:register",
+      "frontend_entrypoint": "mklan-addon-upscale-restore",
+      "backend_migrations": null,
+      "api_mount": "/modules/upscale_restore",
+      "user_mount": "/modules/upscale_restore",
+      "admin_mount": "/admin/modules/upscale_restore",
+      "nav_label": "Upscale + Restore",
+      "nav_href": "/modules/upscale_restore",
+      "admin_nav_label": "Upscale + Restore",
+      "admin_nav_href": "/admin/modules/upscale_restore",
+      "settings_schema": [
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "string",
+          "description": "Execution backend label surfaced in the admin console.",
+          "default": "pillow-lanczos"
+        },
+        {
+          "key": "device",
+          "label": "Device",
+          "type": "string",
+          "description": "Reserved for future ESRGAN-style worker backends.",
+          "default": "cpu"
+        },
+        {
+          "key": "output_format",
+          "label": "Output Format",
+          "type": "string",
+          "description": "Output format used for restored derivatives.",
+          "default": "png"
+        },
+        {
+          "key": "max_input_size",
+          "label": "Max Input Size",
+          "type": "integer",
+          "description": "Largest input dimension processed before scaling.",
+          "default": 4096
+        },
+        {
+          "key": "concurrency",
+          "label": "Concurrency",
+          "type": "integer",
+          "description": "Reserved queue concurrency for future worker-backed execution.",
+          "default": 2
+        },
+        {
+          "key": "retention_policy",
+          "label": "Retention Policy",
+          "type": "string",
+          "description": "How generated upscale artifacts are retained.",
+          "default": "cache-by-settings"
+        }
+      ],
+      "manifest_path": "F:\\MklanLocal-Github\\mklanlocal - modular\\addons\\upscale-restore\\mklan-addon.toml"
+    },
+    {
+      "id": "object_erase",
+      "name": "Object Erase",
+      "version": "0.1.0",
+      "description": "Apply saved rectangle masks and generate erased draft variants for review.",
+      "platform_api_version": "1",
+      "source_ref": "vendored://object_erase@0.1.0",
+      "dependencies": [],
+      "permissions": [
+        "object_erase.read",
+        "object_erase.write"
+      ],
+      "backend_entrypoint": "mklan_addon_object_erase.backend:register",
+      "worker_entrypoint": "mklan_addon_object_erase.worker:register",
+      "frontend_entrypoint": "mklan-addon-object-erase",
+      "backend_migrations": null,
+      "api_mount": "/modules/object_erase",
+      "user_mount": "/modules/object_erase",
+      "admin_mount": "/admin/modules/object_erase",
+      "nav_label": "Object Erase",
+      "nav_href": "/modules/object_erase",
+      "admin_nav_label": "Object Erase",
+      "admin_nav_href": "/admin/modules/object_erase",
+      "settings_schema": [
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "string",
+          "description": "Execution backend label surfaced in the admin console.",
+          "default": "pillow-fill"
+        },
+        {
+          "key": "device",
+          "label": "Device",
+          "type": "string",
+          "description": "Reserved for future inpainting backends.",
+          "default": "cpu"
+        },
+        {
+          "key": "output_format",
+          "label": "Output Format",
+          "type": "string",
+          "description": "Output format used for erased draft exports.",
+          "default": "png"
+        },
+        {
+          "key": "max_input_size",
+          "label": "Max Input Size",
+          "type": "integer",
+          "description": "Largest input dimension processed before masking.",
+          "default": 4096
+        },
+        {
+          "key": "concurrency",
+          "label": "Concurrency",
+          "type": "integer",
+          "description": "Reserved queue concurrency for future worker-backed execution.",
+          "default": 1
+        },
+        {
+          "key": "retention_policy",
+          "label": "Retention Policy",
+          "type": "string",
+          "description": "How erased variants and saved masks are retained.",
+          "default": "keep-history"
+        }
+      ],
+      "manifest_path": "F:\\MklanLocal-Github\\mklanlocal - modular\\addons\\object-erase\\mklan-addon.toml"
+    }
+  ]
+}

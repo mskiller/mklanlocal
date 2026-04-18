@@ -1,0 +1,22 @@
+id = "timeline"
+name = "Timeline"
+version = "1.0.0"
+description = "Calendar-style browsing across indexed assets by capture or modified date."
+platform_api_version = "1"
+kind = "builtin"
+enabled_by_default = false
+permissions = ["timeline.read"]
+
+[contributions]
+backend_router = "media_indexer_backend.api.routes.timeline:router"
+api_mount = "/modules/timeline"
+user_mount = "/timeline"
+admin_mount = "/admin/modules/timeline"
+nav_label = "Timeline"
+nav_href = "/timeline"
+nav_order = 80
+user_visible = true
+admin_visible = true
+
+[settings]
+fields = []

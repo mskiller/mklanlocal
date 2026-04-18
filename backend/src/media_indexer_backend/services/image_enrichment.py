@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from media_indexer_backend.core.config import get_settings
 from media_indexer_backend.models.tables import Asset, AssetMetadata, AssetSearch, AssetSimilarity, AssetTag, TagSuggestion, TagVocabularyEntry
+from media_indexer_backend.platform.runtime import get_ai_tagging_runtime_settings
 from media_indexer_backend.services.clip_embeddings import ClipEmbeddingService
 from media_indexer_backend.services.metadata import build_search_text, canonicalize_tag
 
@@ -427,7 +428,7 @@ class CaptioningService:
             return "cpu"
 
     def warm(self, *, local_only: bool) -> bool:
-        if not self.settings.caption_enabled:
+        if not get_ai_tagging_runtime_settings().caption_enabled:
             return False
         if self._model is not None and self._processor is not None:
             return True
@@ -476,7 +477,7 @@ class OcrService:
         self.settings = get_settings()
 
     def extract(self, image_path: Path) -> tuple[str | None, float | None]:
-        if not self.settings.ocr_enabled:
+        if not get_ai_tagging_runtime_settings().ocr_enabled:
             return (None, None)
         try:
             import pytesseract
@@ -651,7 +652,8 @@ class ImageEnrichmentService:
         }
 
     def provider_statuses(self) -> list[ProviderStatus]:
-        if self.settings.image_tagging_enabled:
+        runtime = get_ai_tagging_runtime_settings()
+        if runtime.image_tagging_enabled:
             statuses = [self.providers[key].status() for key in ("wd_vit_v3", "deepghs_wd_embeddings")]
         else:
             statuses = [
@@ -670,7 +672,7 @@ class ImageEnrichmentService:
             ProviderStatus(
                 key="clip_vocab",
                 label="CLIP Vocabulary",
-                status="ready" if self.clip_embedder.is_loaded else ("cold" if self.settings.clip_enabled else "disabled"),
+                status="ready" if self.clip_embedder.is_loaded else ("cold" if runtime.clip_enabled else "disabled"),
                 device=self.settings.clip_device,
                 source_model=self.settings.clip_model_id,
                 warm=self.clip_embedder.is_loaded,
@@ -680,7 +682,7 @@ class ImageEnrichmentService:
         return statuses
 
     def preload(self) -> list[ProviderStatus]:
-        if self.settings.image_tagging_enabled:
+        if get_ai_tagging_runtime_settings().image_tagging_enabled:
             for key in ("wd_vit_v3", "deepghs_wd_embeddings"):
                 self.providers[key].preload()
         self.clip_embedder.warm()
@@ -718,7 +720,7 @@ class ImageEnrichmentService:
         provider_override: str | None,
         compare_mode: bool,
     ) -> tuple[list[TagSuggestionCandidate], bool]:
-        if not self.settings.image_tagging_enabled:
+        if not get_ai_tagging_runtime_settings().image_tagging_enabled:
             return ([], False)
         provider_keys = self._provider_order(provider_override, compare_mode)
         wd_results: list[TagSuggestionCandidate] = []
@@ -766,7 +768,7 @@ class ImageEnrichmentService:
         existing_tags: set[str],
         wd_tags: set[str],
     ) -> list[TagSuggestionCandidate]:
-        if not self.settings.clip_enabled:
+        if not get_ai_tagging_runtime_settings().clip_enabled:
             return []
         clip_candidates = self.clip_vocab.suggest_for_asset(session, asset_id, image_path=image_path)
         results: list[TagSuggestionCandidate] = []
@@ -825,7 +827,7 @@ class ImageEnrichmentService:
             existing_tags=existing_tags,
             wd_tags=wd_tags,
         )
-        attempted = attempted or self.settings.clip_enabled
+        attempted = attempted or get_ai_tagging_runtime_settings().clip_enabled
 
         combined = wd_candidates + clip_candidates
         combined.sort(key=lambda item: (GROUP_ORDER.get(item.group, 99), -item.score, item.tag, item.source_model))

@@ -46,6 +46,7 @@ services:
       # ── Add your own source folders below ──────────────────────────────────
       # Duplicate these blocks for each folder you want to index.
       # The target path must start with /data/sources/.
+      # Add the source in the UI using that target path, not the original host path.
       # Then add the source via Admin → Sources in the UI.
       #
       # - type: bind
@@ -83,6 +84,7 @@ services:
       - ../sample_media:/data/sources/sample:ro
       - hf_cache:/root/.cache/huggingface
       # ── Mirror the same source bind mounts as the backend service ──────────
+      # The source path you create in the UI must match this container target path.
       #
       # - type: bind
       #   source: /path/to/your/photos

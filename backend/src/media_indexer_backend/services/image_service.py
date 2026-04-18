@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image
-
 from media_indexer_backend.core.config import get_settings
 from media_indexer_backend.models.tables import Asset, Source
 from media_indexer_backend.services.path_safety import resolve_asset_path
+from media_indexer_backend.services.vips_image_service import render_resized_image_to_file
 
 
 def _cache_root() -> Path:
@@ -45,14 +44,14 @@ def ensure_cached_resized_image(
     if cache_path.exists():
         return cache_path
 
-    with Image.open(source_path) as image:
-        image = image.convert("RGB")
-        if width or height:
-            image.thumbnail((width or image.width, height or image.height), Image.Resampling.LANCZOS)
-        if fmt == "webp":
-            image.save(cache_path, format="WEBP", quality=quality, method=4)
-        else:
-            image.save(cache_path, format="JPEG", quality=quality, optimize=True)
+    render_resized_image_to_file(
+        source_path,
+        cache_path,
+        width=width,
+        height=height,
+        quality=quality,
+        fmt=fmt,
+    )
 
     _evict_lru_cache(cache_root, get_settings().preview_cache_max_mb)
     return cache_path

@@ -9,21 +9,23 @@ import { AssetCard } from "@/components/asset-card";
 import { CollectionPickerModal } from "@/components/collection-picker-modal";
 import { ZoomableImageViewer } from "@/components/zoomable-image-viewer";
 import { useAuth } from "@/components/auth-provider";
+import { useModuleRegistry } from "@/components/module-registry-provider";
 import { useToast } from "@/components/use-toast";
 import { TagSuggestionReview } from "@/components/tag-suggestion-review";
 import { ShareModal } from "@/components/share-modal";
 import { DetailTabs } from "@/components/DetailTabs";
 import { VisualWorkflowGraph } from "@/components/VisualWorkflowGraph";
-import { addAssetsToCollection, assetImageUrl, bulkAnnotateAssets, downloadWorkflow, downloadWorkflowFromFile, fetchAsset, fetchCollections, fetchSimilar, fetchSimilarByImage, mediaUrl } from "@/lib/api";
+import { addAssetsToCollection, assetImageUrl, bulkAnnotateAssets, downloadWorkflow, downloadWorkflowFromFile, fetchAsset, fetchAssetFaces, fetchCollections, fetchSimilar, fetchSimilarByImage, mediaUrl, updatePerson } from "@/lib/api";
 import { metadataVersion, numericMetadata, promptTagStringFromMetadata, promptTagsFromMetadata, stringMetadata } from "@/lib/asset-metadata";
 import { sourceFolderBrowseHref } from "@/lib/browse-links";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { TagFilterChip } from "@/components/tag-filter-chip";
-import { AssetDetail, CollectionSummary, ReviewStatus, SimilarAsset } from "@/lib/types";
+import { AssetDetail, AssetFacesResponse, CollectionSummary, ReviewStatus, SimilarAsset } from "@/lib/types";
 
 export default function AssetDetailPage() {
   const params = useParams<{ id: string }>();
   const { user } = useAuth();
+  const { isModuleEnabled } = useModuleRegistry();
   const { push } = useToast();
   const [asset, setAsset] = useState<AssetDetail | null>(null);
   const [duplicates, setDuplicates] = useState<SimilarAsset[]>([]);
@@ -42,18 +44,25 @@ export default function AssetDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [busyExtracting, setBusyExtracting] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [faces, setFaces] = useState<AssetFacesResponse | null>(null);
+  const [showFaceBoxes, setShowFaceBoxes] = useState(false);
+  const collectionsEnabled = isModuleEnabled("collections");
+  const aiTaggingEnabled = isModuleEnabled("ai_tagging");
+  const charactersEnabled = isModuleEnabled("characters");
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [nextAsset, nextDuplicates, nextSemantic, nextTagSimilar, nextVisualMatches] = await Promise.all([
+        const [nextAsset, nextFaces, nextDuplicates, nextSemantic, nextTagSimilar, nextVisualMatches] = await Promise.all([
           fetchAsset(params.id),
+          fetchAssetFaces(params.id).catch(() => ({ enabled: false, image_width: null, image_height: null, items: [] })),
           fetchSimilar(params.id, "duplicate", 6),
           fetchSimilar(params.id, "semantic", 6),
           fetchSimilar(params.id, "tag", 6),
           fetchSimilarByImage(params.id, 6).catch(() => []),
         ]);
         setAsset(nextAsset);
+        setFaces(nextFaces);
         setRating(nextAsset.annotation?.rating ?? null);
         setReviewStatus(nextAsset.annotation?.review_status ?? "unreviewed");
         setFlagged(nextAsset.annotation?.flagged ?? false);
@@ -70,7 +79,7 @@ export default function AssetDetailPage() {
   }, [params.id]);
 
   useEffect(() => {
-    if (!user?.capabilities.can_manage_collections) {
+    if (!user?.capabilities.can_manage_collections || !collectionsEnabled) {
       return;
     }
     const loadCollections = async () => {
@@ -81,26 +90,67 @@ export default function AssetDetailPage() {
       }
     };
     void loadCollections();
-  }, [user?.capabilities.can_manage_collections]);
+  }, [user?.capabilities.can_manage_collections, collectionsEnabled]);
 
   const preview = mediaUrl(asset?.preview_url ?? asset?.content_url);
+  const streamUrl = asset ? mediaUrl(`/assets/${asset.id}/stream`) : undefined;
   const content = asset ? assetImageUrl(asset.id, { w: 3000, fmt: "webp" }) : undefined;
   const deepzoom = mediaUrl(asset?.deepzoom_url);
+  const waveformPreview = mediaUrl(asset?.waveform_url);
+  const keyframePreviews = (asset?.video_keyframes ?? []).map((path) => mediaUrl(path)).filter(Boolean) as string[];
   const promptTags = asset ? promptTagsFromMetadata(asset.normalized_metadata, 12) : [];
   const promptTagString = asset ? promptTagStringFromMetadata(asset.normalized_metadata) : null;
   const assetTags = asset ? asset.tags.filter((tag) => !promptTags.includes(tag)) : [];
-  const staleMetadata = asset ? metadataVersion(asset.normalized_metadata) < 6 : false;
+  const staleMetadata = asset ? metadataVersion(asset.normalized_metadata) < 7 : false;
   const positivePrompt = asset ? stringMetadata(asset.normalized_metadata["prompt"]) : null;
   const negativePrompt = asset ? stringMetadata(asset.normalized_metadata["negative_prompt"]) : null;
   const workflowText = asset ? stringMetadata(asset.normalized_metadata["workflow_text"]) : null;
   const caption = asset?.caption ?? stringMetadata(asset?.normalized_metadata?.["caption"]);
   const ocrText = asset?.ocr_text ?? stringMetadata(asset?.normalized_metadata?.["ocr_text"]);
+  const characterCardDetected = asset ? asset.normalized_metadata["character_card_detected"] === true && charactersEnabled : false;
+  const characterName = asset ? stringMetadata(asset.normalized_metadata["character_name"]) : null;
+  const characterCreator = asset ? stringMetadata(asset.normalized_metadata["character_creator"]) : null;
+  const characterDescription = asset ? stringMetadata(asset.normalized_metadata["character_description"]) : null;
+  const characterPersonality = asset ? stringMetadata(asset.normalized_metadata["character_personality"]) : null;
+  const characterScenario = asset ? stringMetadata(asset.normalized_metadata["character_scenario"]) : null;
+  const characterFirstMessage = asset ? stringMetadata(asset.normalized_metadata["character_first_message"]) : null;
+  const characterTags =
+    asset && Array.isArray(asset.normalized_metadata["character_tags"])
+      ? asset.normalized_metadata["character_tags"].filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
   const gpsLatitude = asset ? numericMetadata(asset.normalized_metadata["gps_latitude"]) : null;
   const gpsLongitude = asset ? numericMetadata(asset.normalized_metadata["gps_longitude"]) : null;
   const browseHref = asset ? sourceFolderBrowseHref(asset.source_id, asset.relative_path) : "/sources";
   const summaryEntries = asset
     ? Object.entries(asset.normalized_metadata).filter(
-        ([key]) => !["prompt", "negative_prompt", "workflow_text", "prompt_tags", "caption", "caption_source", "ocr_text", "ocr_confidence"].includes(key)
+        ([key]) =>
+          ![
+            "prompt",
+            "negative_prompt",
+            "workflow_text",
+            "prompt_tags",
+            "caption",
+            "caption_source",
+            "ocr_text",
+            "ocr_confidence",
+            "character_card_detected",
+            "character_name",
+            "character_creator",
+            "character_description",
+            "character_personality",
+            "character_scenario",
+            "character_first_message",
+            "character_message_examples",
+            "character_creator_notes",
+            "character_system_prompt",
+            "character_post_history_instructions",
+            "character_version",
+            "character_tags",
+            "character_alternate_greetings",
+            "character_group_only_greetings",
+            "character_card_spec",
+            "character_card_spec_version",
+          ].includes(key)
       )
     : [];
   const mapBounds =
@@ -115,6 +165,20 @@ export default function AssetDetailPage() {
     gpsLatitude !== null && gpsLongitude !== null
       ? `https://www.openstreetmap.org/?mlat=${gpsLatitude}&mlon=${gpsLongitude}#map=14/${gpsLatitude}/${gpsLongitude}`
       : null;
+  const appMapUrl = asset && gpsLatitude !== null && gpsLongitude !== null ? `/map?highlight=${asset.id}` : null;
+  const faceImageWidth = faces?.image_width ?? 0;
+  const faceImageHeight = faces?.image_height ?? 0;
+  const faceOverlays =
+    showFaceBoxes && faces?.enabled && faceImageWidth > 0 && faceImageHeight > 0
+      ? faces.items.map((face) => ({
+          id: face.id,
+          x: face.bbox_x1,
+          y: face.bbox_y1,
+          width: face.bbox_x2 - face.bbox_x1,
+          height: face.bbox_y2 - face.bbox_y1,
+          label: face.person?.name ?? "Face",
+        }))
+      : [];
 
   const handleVisualExtract = async () => {
     if (!asset) return;
@@ -142,6 +206,10 @@ export default function AssetDetailPage() {
     { id: "workflow", label: "Visual Workflow", icon: "⚡" },
     { id: "similar", label: "Related", icon: "🔗" },
   ];
+
+  if (characterCardDetected) {
+    tabs.splice(2, 0, { id: "character", label: "Character Card", icon: "🧠" });
+  }
 
   if (gpsLatitude !== null && gpsLongitude !== null) {
     tabs.push({ id: "location", label: "Location", icon: "📍" });
@@ -197,7 +265,7 @@ export default function AssetDetailPage() {
               </div>
             </div>
 
-            {user?.capabilities.can_manage_collections && asset ? (
+            {user?.capabilities.can_manage_collections && collectionsEnabled && asset ? (
               <div className="row" style={{ gap: "0.5rem" }}>
                 <button type="button" className="button ghost-button small-button" onClick={() => setCollectionOpen(true)}>
                   Add to Collection
@@ -228,16 +296,56 @@ export default function AssetDetailPage() {
                 <div className="preview-tab">
                   <article className="asset-main stack">
                     <div className="preview-container">
-                      {deepzoom ? (
+                      {asset?.media_type === "video" ? (
+                        <div className="static-preview-container">
+                          <video
+                            src={streamUrl}
+                            poster={preview}
+                            controls
+                            preload="metadata"
+                            className="asset-preview-image"
+                            style={{ width: "100%", maxHeight: "72vh", background: "#000" }}
+                          />
+                          <div className="preview-actions">
+                            <a href={streamUrl} target="_blank" rel="noopener noreferrer" className="button ghost-button">
+                              Stream in New Tab
+                            </a>
+                            <a href={mediaUrl(asset?.content_url)} target="_blank" rel="noopener noreferrer" className="button subtle-button">
+                              Open Original File
+                            </a>
+                          </div>
+                        </div>
+                      ) : deepzoom ? (
                         <ZoomableImageViewer
                           deepzoomUrl={deepzoom}
                           previewSrc={preview}
                           contentSrc={content}
                           alt={asset?.filename ?? "Asset preview"}
+                          overlays={faceOverlays}
                         />
                       ) : (
                         <div className="static-preview-container">
-                          <img src={preview ?? ""} alt={asset?.filename ?? "Preview"} className="asset-preview-image" />
+                          <div style={{ position: "relative", width: "100%" }}>
+                            <img src={preview ?? ""} alt={asset?.filename ?? "Preview"} className="asset-preview-image" />
+                            {showFaceBoxes && faceImageWidth > 0 && faceImageHeight > 0
+                              ? (faces?.items ?? []).map((face) => (
+                                  <div
+                                    key={face.id}
+                                    style={{
+                                      position: "absolute",
+                                      left: `${(face.bbox_x1 / faceImageWidth) * 100}%`,
+                                      top: `${(face.bbox_y1 / faceImageHeight) * 100}%`,
+                                      width: `${((face.bbox_x2 - face.bbox_x1) / faceImageWidth) * 100}%`,
+                                      height: `${((face.bbox_y2 - face.bbox_y1) / faceImageHeight) * 100}%`,
+                                      border: "2px solid rgba(255, 94, 91, 0.95)",
+                                      borderRadius: "0.8rem",
+                                      boxSizing: "border-box",
+                                      pointerEvents: "none",
+                                    }}
+                                  />
+                                ))
+                              : null}
+                          </div>
                           <div className="preview-actions">
                             <a href={mediaUrl(asset?.content_url)} target="_blank" rel="noopener noreferrer" className="button ghost-button">
                               View Original High-Res
@@ -268,8 +376,99 @@ export default function AssetDetailPage() {
                         ))}
                       </div>
 
-                      {asset && <TagSuggestionReview assetId={asset.id} onChanged={async () => setAsset(await fetchAsset(asset.id))} />}
+                      {asset && aiTaggingEnabled ? <TagSuggestionReview assetId={asset.id} onChanged={async () => setAsset(await fetchAsset(asset.id))} /> : null}
                     </div>
+
+                    {faces?.items.length ? (
+                      <article className="panel stack">
+                        <div className="row-between">
+                          <div>
+                            <p className="eyebrow">Faces</p>
+                            <h2>{faces.items.length} detections</h2>
+                          </div>
+                          {faces.enabled ? (
+                            <button
+                              type="button"
+                              className={`button ghost-button small-button ${showFaceBoxes ? "image-toolbar-btn-active" : ""}`}
+                              onClick={() => setShowFaceBoxes((value) => !value)}
+                            >
+                              {showFaceBoxes ? "Hide Boxes" : "Show Boxes"}
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className="similarity-scroll">
+                          {faces.items.map((face) => (
+                            <article key={face.id} className="panel" style={{ minWidth: "148px", padding: "0.5rem" }}>
+                              {face.crop_preview_url ? (
+                                <img
+                                  src={mediaUrl(face.crop_preview_url)}
+                                  alt={face.person?.name ?? "Face crop"}
+                                  style={{ width: "136px", height: "136px", objectFit: "cover", borderRadius: "1rem" }}
+                                />
+                              ) : null}
+                              <div style={{ marginTop: "0.45rem" }}>
+                                <strong>{face.person?.name ?? "Unnamed person"}</strong>
+                                {face.person ? (
+                                  <div className="card-actions" style={{ marginTop: "0.35rem" }}>
+                                    <Link href={`/people/${face.person.id}`} className="button ghost-button small-button">Open</Link>
+                                    {(user?.role === "admin" || user?.role === "curator") ? (
+                                      <button
+                                        type="button"
+                                        className="button subtle-button small-button"
+                                        onClick={async () => {
+                                          try {
+                                            await updatePerson(face.person!.id, { cover_face_id: face.id });
+                                            setFaces(await fetchAssetFaces(params.id));
+                                          } catch {
+                                            // ignore transient face update errors on detail view
+                                          }
+                                        }}
+                                      >
+                                        Set Cover
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      </article>
+                    ) : null}
+
+                    {asset?.media_type === "video" && (waveformPreview || keyframePreviews.length) ? (
+                      <article className="panel stack">
+                        <div>
+                          <p className="eyebrow">Video Artifacts</p>
+                          <h2>Waveform & Keyframes</h2>
+                        </div>
+                        {waveformPreview ? (
+                          <img
+                            src={waveformPreview}
+                            alt={`${asset.filename} waveform`}
+                            style={{ width: "100%", borderRadius: "1rem", border: "1px solid var(--border)" }}
+                          />
+                        ) : null}
+                        {keyframePreviews.length ? (
+                          <div className="similarity-scroll">
+                            {keyframePreviews.map((frameUrl, index) => (
+                              <img
+                                key={frameUrl}
+                                src={frameUrl}
+                                alt={`${asset.filename} keyframe ${index + 1}`}
+                                style={{
+                                  width: "min(260px, 100%)",
+                                  aspectRatio: "16 / 9",
+                                  objectFit: "cover",
+                                  borderRadius: "1rem",
+                                  border: "1px solid var(--border)",
+                                }}
+                              />
+                            ))}
+                          </div>
+                        ) : null}
+                      </article>
+                    ) : null}
                   </article>
                 </div>
               )}
@@ -336,6 +535,47 @@ export default function AssetDetailPage() {
                         </div>
                       ))}
                     </div>
+                  </article>
+                </div>
+              )}
+
+              {activeTab === "character" && characterCardDetected && asset && (
+                <div className="metadata-tab stack">
+                  <article className="panel stack">
+                    <div className="row-between">
+                      <div>
+                        <p className="eyebrow">SillyTavern Card</p>
+                        <h2>{characterName ?? asset.filename}</h2>
+                      </div>
+                      <Link href={`/characters/${asset.id}`} className="button small-button">
+                        Open in Characters
+                      </Link>
+                    </div>
+                    <div className="chip-row">
+                      {characterCreator ? <span className="chip">{characterCreator}</span> : null}
+                      {characterTags.map((value) => (
+                        <span key={`character-${value}`} className="chip">{value}</span>
+                      ))}
+                    </div>
+                    {characterDescription ? (
+                      <div className="prompt-content selectable">{characterDescription}</div>
+                    ) : null}
+                    <div className="two-column">
+                      <article className="panel stack">
+                        <p className="eyebrow">Personality</p>
+                        <div className="prompt-content subdued selectable">{characterPersonality ?? "No personality text embedded."}</div>
+                      </article>
+                      <article className="panel stack">
+                        <p className="eyebrow">Scenario</p>
+                        <div className="prompt-content subdued selectable">{characterScenario ?? "No scenario text embedded."}</div>
+                      </article>
+                    </div>
+                    {characterFirstMessage ? (
+                      <article className="panel stack">
+                        <p className="eyebrow">First Message</p>
+                        <div className="prompt-content selectable">{characterFirstMessage}</div>
+                      </article>
+                    ) : null}
                   </article>
                 </div>
               )}
@@ -446,6 +686,29 @@ export default function AssetDetailPage() {
 
         {/* Sidebar / Sidebar equivalent for detail page */}
         <aside className="asset-sidebar stack">
+          {gpsLatitude !== null && gpsLongitude !== null ? (
+            <section className="panel stack">
+              <div className="row-between">
+                <span className="eyebrow">Location</span>
+                <Link href={appMapUrl ?? "#"} className="subdued small">
+                  Open full map
+                </Link>
+              </div>
+              {mapEmbedUrl ? (
+                <iframe
+                  title="Asset location preview"
+                  src={mapEmbedUrl}
+                  width="100%"
+                  height="200"
+                  style={{ border: 0, borderRadius: "1rem" }}
+                  loading="lazy"
+                />
+              ) : null}
+              <a href={mapExternalUrl ?? undefined} target="_blank" rel="noopener noreferrer" className="button ghost-button small-button">
+                View on OpenStreetMap
+              </a>
+            </section>
+          ) : null}
           <section className="panel stack">
             <span className="eyebrow">Management</span>
             <div className="stack" style={{ gap: "0.8rem" }}>

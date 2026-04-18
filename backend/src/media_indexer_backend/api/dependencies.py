@@ -8,7 +8,9 @@ from media_indexer_backend.core.config import get_settings
 from media_indexer_backend.db.session import get_db_session
 from media_indexer_backend.models.enums import UserRole, UserStatus
 from media_indexer_backend.models.tables import User
+from media_indexer_backend.platform.service import ensure_module_enabled as ensure_platform_module_enabled
 from media_indexer_backend.schemas.auth import AuthCapabilities
+from media_indexer_backend.services.api_token_service import authenticate_api_token
 from media_indexer_backend.services.user_service import capabilities_for_user, enforce_user_status
 
 
@@ -67,6 +69,60 @@ def require_upload_access(
     if not capabilities.can_upload_assets:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Upload access required.")
     return current_user
+
+
+def require_curation_access(
+    current_user: User = Depends(get_current_user),
+    capabilities: AuthCapabilities = Depends(get_current_capabilities),
+) -> User:
+    if not capabilities.can_curate_assets:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Asset curation access required.")
+    return current_user
+
+
+def require_share_access(
+    current_user: User = Depends(get_current_user),
+    capabilities: AuthCapabilities = Depends(get_current_capabilities),
+) -> User:
+    if not capabilities.can_manage_shares:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Share management access required.")
+    return current_user
+
+
+def require_smart_album_access(
+    current_user: User = Depends(get_current_user),
+    capabilities: AuthCapabilities = Depends(get_current_capabilities),
+) -> User:
+    if not capabilities.can_manage_smart_albums:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Smart album access required.")
+    return current_user
+
+
+def require_curator_or_admin(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role not in {UserRole.CURATOR, UserRole.ADMIN}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Curator or admin access required.")
+    return current_user
+
+
+def require_enabled_module(module_id: str):
+    def dependency(session: Session = Depends(get_session)) -> None:
+        ensure_platform_module_enabled(session, module_id)
+
+    return dependency
+
+
+def require_api_token_user(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+    session: Session = Depends(get_session),
+) -> User:
+    raw_token = x_api_key
+    if authorization and authorization.lower().startswith("bearer "):
+        raw_token = authorization[7:]
+    if not raw_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Valid API token required.")
+    user = authenticate_api_token(session, raw_token)
+    return enforce_user_status(session, user)
 
 
 def user_can_access_source(capabilities: AuthCapabilities, source_id) -> bool:

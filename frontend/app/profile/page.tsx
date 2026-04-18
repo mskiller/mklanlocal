@@ -42,6 +42,18 @@ export default function ProfilePage() {
               <div className="subdued">{user?.capabilities.can_manage_collections ? "Yes" : "No"}</div>
             </div>
             <div className="metadata-row">
+              <strong>Curate Assets</strong>
+              <div className="subdued">{user?.capabilities.can_curate_assets ? "Yes" : "No"}</div>
+            </div>
+            <div className="metadata-row">
+              <strong>Manage Shares</strong>
+              <div className="subdued">{user?.capabilities.can_manage_shares ? "Yes" : "No"}</div>
+            </div>
+            <div className="metadata-row">
+              <strong>Smart Albums</strong>
+              <div className="subdued">{user?.capabilities.can_manage_smart_albums ? "Yes" : "No"}</div>
+            </div>
+            <div className="metadata-row">
               <strong>Upload Images</strong>
               <div className="subdued">{user?.capabilities.can_upload_assets ? "Yes" : "No"}</div>
             </div>

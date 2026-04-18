@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Background scan/index worker for the media indexer MVP"
 requires-python = ">=3.12"
 dependencies = [
+  "fastapi>=0.115.0",
   "huggingface_hub>=0.32.0",
   "numpy>=2.1.0",
   "onnxruntime>=1.20.0",
@@ -15,10 +16,13 @@ dependencies = [
   "Pillow>=11.0.0",
   "pgvector>=0.3.5",
   "psycopg[binary]>=3.2.0",
+  "pyvips>=3.0.0",
   "pytesseract>=0.3.13",
   "sqlalchemy>=2.0.36",
   "torch>=2.5.0",
   "transformers>=4.46.0",
+  "uvicorn[standard]>=0.32.0",
+  "watchdog>=6.0.0",
 ]
 
 [tool.setuptools]

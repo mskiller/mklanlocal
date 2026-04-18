@@ -1,22 +1,43 @@
 import {
+  AdminHealthResponse,
   AdminSettings,
+  AddonArtifact,
+  AddonJob,
+  AddonPreset,
+  ApiTokenCreateResponse,
+  ApiTokenSummary,
+  AssetBrowseItem,
   AssetBrowseResponse,
+  CharacterCardDetail,
+  CharacterCardListResponse,
+  CharacterCardUpdateRequest,
   AssetDetail,
+  AssetFacesResponse,
   AssetListResponse,
   AuditLogEntry,
   AuthUser,
   ClusteringResultsResponse,
+  ClearScanJobsResponse,
   CollectionDetail,
   CollectionSummary,
   CompareResponse,
+  CropSpec,
+  GeoFeatureCollection,
   GroupSummary,
+  InboxCompareResponse,
+  InboxItem,
   PublicShareResponse,
   RelatedTag,
   ResetResponse,
   ScanJob,
   ScanJobErrorEntry,
   SearchFilters,
+  ScheduledScan,
   SimilarAsset,
+  SmartAlbumDetail,
+  SmartAlbumRule,
+  SmartAlbumSummary,
+  SortDirection,
   Source,
   SourceBrowseInspect,
   SourceBrowseResponse,
@@ -30,9 +51,13 @@ import {
   TimelineDayBucket,
   TimelineMonthBucket,
   TimelineYearBucket,
+  PersonDetail,
+  PersonSummary,
+  PlatformModule,
   UserRole,
   UserStatus,
   UserSummary,
+  WebhookEndpoint,
 } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
@@ -71,7 +96,8 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 function buildQuery<T extends object>(filters: T): string {
   const params = new URLSearchParams();
   Object.entries(filters as Record<string, string | number | boolean | null | undefined>).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === "" || value === false) {
+    // Explicitly include boolean false (e.g. flagged=false) — only skip nullish/empty values
+    if (value === undefined || value === null || value === "") {
       return;
     }
     params.set(key, String(value));
@@ -110,8 +136,8 @@ export function changePassword(payload: { current_password: string; new_password
   });
 }
 
-export function fetchSources() {
-  return apiFetch<Source[]>("/sources");
+export function fetchSources(init?: RequestInit) {
+  return apiFetch<Source[]>("/sources", init);
 }
 
 export function fetchSource(id: string) {
@@ -147,8 +173,8 @@ export function triggerScan(id: string) {
   return apiFetch<ScanJob>(`/sources/${id}/scan`, { method: "POST" });
 }
 
-export function fetchScanJobs() {
-  return apiFetch<ScanJob[]>("/scan-jobs");
+export function fetchScanJobs(init?: RequestInit) {
+  return apiFetch<ScanJob[]>("/scan-jobs", init);
 }
 
 export function fetchScanJob(id: string) {
@@ -163,8 +189,12 @@ export function cancelScanJob(id: string) {
   return apiFetch<ScanJob>(`/scan-jobs/${id}/cancel`, { method: "POST" });
 }
 
-export function fetchAssets(filters: SearchFilters = {}) {
-  return apiFetch<AssetListResponse>(`/assets${buildQuery(filters)}`);
+export function clearDoneScanJobs() {
+  return apiFetch<ClearScanJobsResponse>("/scan-jobs/done", { method: "DELETE" });
+}
+
+export function fetchAssets(filters: SearchFilters = {}, init?: RequestInit) {
+  return apiFetch<AssetListResponse>(`/assets${buildQuery(filters)}`, init);
 }
 
 export function fetchAssetBrowse(filters: { source_id?: string; sort?: string; page?: number; page_size?: number; exclude_tags?: string } = {}) {
@@ -176,8 +206,46 @@ export function fetchAsset(id: string) {
   return apiFetch<AssetDetail>(`/assets/${id}`);
 }
 
+export function fetchCharacterCards(filters: {
+  q?: string;
+  creator?: string;
+  tag?: string;
+  source_id?: string;
+  page?: number;
+  page_size?: number;
+} = {}) {
+  return apiFetch<CharacterCardListResponse>(`/characters${buildQuery(filters)}`);
+}
+
+export function fetchCharacterCard(assetId: string) {
+  return apiFetch<CharacterCardDetail>(`/characters/${assetId}`);
+}
+
+export function updateCharacterCard(assetId: string, payload: CharacterCardUpdateRequest) {
+  return apiFetch<CharacterCardDetail>(`/characters/${assetId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchAssetFaces(id: string) {
+  return apiFetch<AssetFacesResponse>(`/assets/${id}/faces`);
+}
+
 export function fetchSearch(filters: SearchFilters = {}) {
   return apiFetch<AssetListResponse>(`/search${buildQuery(filters)}`);
+}
+
+export function fetchNaturalLanguageSearch(
+  q: string,
+  options: {
+    limit?: number;
+    sort?: "relevance" | "created_at" | "indexed_at" | "modified_at" | "filename";
+    sort_direction?: SortDirection;
+  } = {}
+) {
+  const { limit = 50, ...filters } = options;
+  return apiFetch<AssetListResponse>(`/search/nl${buildQuery({ q, limit, ...filters })}`);
 }
 
 export function fetchTags() {
@@ -214,6 +282,104 @@ export function fetchCompare(a: string, b: string) {
   return apiFetch<CompareResponse>(`/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
 }
 
+export function fetchGeoAssets(bbox?: string) {
+  return apiFetch<GeoFeatureCollection>(`/assets/geo${buildQuery({ bbox })}`);
+}
+
+export function fetchPeople(filters: { q?: string; unnamed_only?: boolean } = {}) {
+  return apiFetch<PersonSummary[]>(`/people${buildQuery(filters)}`);
+}
+
+export function fetchPerson(id: string) {
+  return apiFetch<PersonDetail>(`/people/${id}`);
+}
+
+export function fetchPersonAssets(id: string) {
+  return apiFetch<AssetBrowseItem[]>(`/people/${id}/assets`);
+}
+
+export function updatePerson(id: string, payload: { name?: string | null; cover_face_id?: string | null }) {
+  return apiFetch<PersonDetail>(`/people/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function mergePerson(id: string, sourcePersonId: string) {
+  return apiFetch<PersonDetail>(`/people/${id}/merge`, {
+    method: "POST",
+    body: JSON.stringify({ source_person_id: sourcePersonId }),
+  });
+}
+
+export function reclusterPeople() {
+  return apiFetch<{ reassigned_faces: number; created_people: number }>("/people/recluster", {
+    method: "POST",
+  });
+}
+
+export function fetchSmartAlbums() {
+  return apiFetch<SmartAlbumSummary[]>("/smart-albums");
+}
+
+export function fetchSmartAlbum(id: string) {
+  return apiFetch<SmartAlbumDetail>(`/smart-albums/${id}`);
+}
+
+export function createSmartAlbum(payload: {
+  name: string;
+  description?: string | null;
+  enabled?: boolean;
+  rule: SmartAlbumRule;
+}) {
+  return apiFetch<SmartAlbumSummary>("/smart-albums", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateSmartAlbum(
+  id: string,
+  payload: {
+    name?: string;
+    description?: string | null;
+    enabled?: boolean;
+    rule?: SmartAlbumRule;
+  }
+) {
+  return apiFetch<SmartAlbumSummary>(`/smart-albums/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteSmartAlbum(id: string) {
+  return apiFetch<void>(`/smart-albums/${id}`, { method: "DELETE" });
+}
+
+export function syncSmartAlbum(id: string) {
+  return apiFetch<SmartAlbumSummary>(`/smart-albums/${id}/sync`, { method: "POST" });
+}
+
+export function fetchInbox(status?: string, countOnly = false) {
+  return apiFetch<InboxItem[] | { count: number }>(`/inbox${buildQuery({ status, count_only: countOnly })}`);
+}
+
+export function fetchInboxCompare(id: string) {
+  return apiFetch<InboxCompareResponse>(`/inbox/${id}/compare`);
+}
+
+export function approveInboxItem(id: string, targetSourceId?: string) {
+  return apiFetch<void>(`/inbox/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ target_source_id: targetSourceId }),
+  });
+}
+
+export function rejectInboxItem(id: string) {
+  return apiFetch<void>(`/inbox/${id}/reject`, { method: "POST" });
+}
+
 export function submitCompareReview(assetIdA: string, assetIdB: string, action: string) {
   return apiFetch<void>("/compare/review", {
     method: "POST",
@@ -230,6 +396,90 @@ export function resetApplicationData(mode: "index" | "all") {
 
 export function fetchAdminUsers() {
   return apiFetch<UserSummary[]>("/admin/users");
+}
+
+export function fetchModuleRegistry() {
+  return apiFetch<PlatformModule[]>("/modules/registry");
+}
+
+export function fetchAdminModules() {
+  return apiFetch<PlatformModule[]>("/admin/modules");
+}
+
+export function fetchAdminModule(moduleId: string) {
+  return apiFetch<PlatformModule>(`/admin/modules/${encodeURIComponent(moduleId)}`);
+}
+
+export function updateAdminModule(
+  moduleId: string,
+  payload: { enabled?: boolean; settings_json?: Record<string, unknown> }
+) {
+  return apiFetch<PlatformModule>(`/admin/modules/${encodeURIComponent(moduleId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function rescanAdminModules() {
+  return apiFetch<PlatformModule[]>("/admin/modules/rescan", {
+    method: "POST",
+  });
+}
+
+export function fetchAddonJobs(moduleId: string, limit = 20) {
+  return apiFetch<AddonJob[]>(`/modules/${encodeURIComponent(moduleId)}/jobs?limit=${limit}`);
+}
+
+export function createAddonJob(
+  moduleId: string,
+  payload: {
+    asset_id?: string;
+    asset_ids?: string[];
+    collection_id?: string;
+    preset_id?: string;
+    params_json?: Record<string, unknown>;
+  }
+) {
+  return apiFetch<AddonJob>(`/modules/${encodeURIComponent(moduleId)}/jobs`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchAddonAssetArtifacts(moduleId: string, assetId: string) {
+  return apiFetch<AddonArtifact[]>(`/modules/${encodeURIComponent(moduleId)}/assets/${assetId}/artifacts`);
+}
+
+export function promoteAddonArtifact(moduleId: string, artifactId: string, folder?: string) {
+  const query = buildQuery({ folder });
+  return apiFetch<SourceUploadResponse>(`/modules/${encodeURIComponent(moduleId)}/artifacts/${artifactId}/promote${query}`, {
+    method: "POST",
+  });
+}
+
+export function fetchAddonPresets(moduleId: string) {
+  return apiFetch<AddonPreset[]>(`/modules/${encodeURIComponent(moduleId)}/presets`);
+}
+
+export function createAddonPreset(
+  moduleId: string,
+  payload: { name: string; description?: string | null; config_json?: Record<string, unknown> }
+) {
+  return apiFetch<AddonPreset>(`/modules/${encodeURIComponent(moduleId)}/presets`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateAddonPreset(
+  moduleId: string,
+  presetId: string,
+  payload: { name?: string; description?: string | null; config_json?: Record<string, unknown> }
+) {
+  return apiFetch<AddonPreset>(`/modules/${encodeURIComponent(moduleId)}/presets/${presetId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function createAdminUser(payload: { username: string; password: string; role: UserRole }) {
@@ -304,6 +554,77 @@ export function fetchAuditLogs(limit = 50) {
 
 export function fetchAdminSettings() {
   return apiFetch<AdminSettings>("/admin/settings");
+}
+
+export function fetchAdminHealth() {
+  return apiFetch<AdminHealthResponse>("/admin/health");
+}
+
+export function fetchSchedules() {
+  return apiFetch<ScheduledScan[]>("/admin/schedules");
+}
+
+export function createSchedule(payload: { source_id: string; cron_expression: string; enabled?: boolean }) {
+  return apiFetch<ScheduledScan>("/admin/schedules", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateSchedule(id: string, payload: { cron_expression?: string; enabled?: boolean }) {
+  return apiFetch<ScheduledScan>(`/admin/schedules/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteSchedule(id: string) {
+  return apiFetch<void>(`/admin/schedules/${id}`, { method: "DELETE" });
+}
+
+export function fetchWebhookEvents() {
+  return apiFetch<string[]>("/admin/webhook-events");
+}
+
+export function fetchWebhooks() {
+  return apiFetch<WebhookEndpoint[]>("/admin/webhooks");
+}
+
+export function createWebhook(payload: { url: string; secret: string; events: string[]; enabled?: boolean }) {
+  return apiFetch<WebhookEndpoint>("/admin/webhooks", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateWebhook(id: string, payload: { url?: string; secret?: string; events?: string[]; enabled?: boolean }) {
+  return apiFetch<WebhookEndpoint>(`/admin/webhooks/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteWebhook(id: string) {
+  return apiFetch<void>(`/admin/webhooks/${id}`, { method: "DELETE" });
+}
+
+export function testWebhook(id: string) {
+  return apiFetch<void>(`/admin/webhooks/${id}/test`, { method: "POST" });
+}
+
+export function fetchApiTokens() {
+  return apiFetch<ApiTokenSummary[]>("/admin/api-tokens");
+}
+
+export function createApiToken(payload: { name: string; expires_at?: string | null }) {
+  return apiFetch<ApiTokenCreateResponse>("/admin/api-tokens", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function revokeApiToken(id: string) {
+  return apiFetch<void>(`/admin/api-tokens/${id}`, { method: "DELETE" });
 }
 
 export function updateAdminSettings(payload: AdminSettings) {
@@ -436,6 +757,39 @@ export async function uploadToSource(id: string, files: File[], folder = "") {
   return parseResponse<SourceUploadResponse>(response);
 }
 
+export async function uploadEditedToSource(id: string, file: File, crop: CropSpec, folder = "") {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (folder.trim()) {
+    formData.append("folder", folder.trim());
+  }
+  formData.append("rotation_quadrants", String(crop.rotation_quadrants));
+  formData.append("crop_x", String(crop.crop_x));
+  formData.append("crop_y", String(crop.crop_y));
+  formData.append("crop_width", String(crop.crop_width));
+  formData.append("crop_height", String(crop.crop_height));
+
+  const response = await fetch(`${API_BASE_URL}/sources/${id}/upload-edited`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+  if (!response.ok) {
+    const body = response.headers.get("content-type")?.includes("application/json")
+      ? await response.json()
+      : null;
+    throw new Error(body?.detail ?? "Edited upload failed.");
+  }
+  return parseResponse<SourceUploadResponse>(response);
+}
+
+export function createAssetCropDraft(id: string, payload: CropSpec & { folder?: string }) {
+  return apiFetch<SourceUploadResponse>(`/assets/${id}/crop-draft`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 /** M4 — Auth-aware workflow download; avoids 401 on JWT setups */
 export async function downloadWorkflow(assetId: string, filename: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/assets/${assetId}/workflow/download`, {
@@ -561,4 +915,3 @@ export function fetchRelatedTags(tag: string, limit = 12) {
 export function fetchPublicShare(id: string) {
   return apiFetch<PublicShareResponse>(`/share/${id}`);
 }
-

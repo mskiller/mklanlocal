@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from media_indexer_backend.models.tables import Asset, Collection, CollectionAsset, User
+from media_indexer_backend.platform.events import publish_event
 from media_indexer_backend.schemas.asset import AssetBrowseItem
 from media_indexer_backend.schemas.collection import (
     CollectionAssetAddRequest,
@@ -129,6 +130,15 @@ def add_assets_to_collection(
             continue
         session.add(CollectionAsset(collection_id=collection_id, asset_id=asset_id, added_by=added_by))
     session.flush()
+    publish_event(
+        session,
+        "collection.asset_added",
+        {
+            "user_id": str(added_by),
+            "collection_id": str(collection.id),
+            "asset_ids": [str(asset_id) for asset_id in payload.asset_ids if asset_id in asset_map],
+        },
+    )
     return get_collection_detail(session, collection.id, page=1, page_size=48, current_user=current_user)
 
 
@@ -155,6 +165,7 @@ def add_search_results_to_collection(
         height_max=payload.height_max,
         duration_min=payload.duration_min,
         duration_max=payload.duration_max,
+        has_gps=None,
         tags=payload.tags,
         auto_tags=payload.auto_tags,
         current_user=current_user,

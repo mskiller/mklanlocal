@@ -34,6 +34,15 @@ export interface MediaDeepZoomSource {
   deepzoomUrl?: string | null;
 }
 
+export interface DeepZoomOverlay {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label?: string | null;
+}
+
 function readViewportState(viewer: any): DeepZoomViewportState | null {
   const item = viewer?.world?.getItemAt?.(0);
   if (!item || !viewer?.viewport) {
@@ -119,6 +128,7 @@ export const MediaDeepZoomStage = forwardRef<
     onViewportStateChange?: (state: DeepZoomViewportState) => void;
     onSourceReady?: () => void;
     children?: ReactNode;
+    overlays?: DeepZoomOverlay[];
   }
 >(
   (
@@ -135,6 +145,7 @@ export const MediaDeepZoomStage = forwardRef<
       onViewportStateChange,
       onSourceReady,
       children,
+      overlays = [],
     },
     ref
   ) => {
@@ -143,6 +154,7 @@ export const MediaDeepZoomStage = forwardRef<
     const currentSourceTokenRef = useRef(0);
     const pendingRestoreStateRef = useRef<{ token: number; state: DeepZoomViewportState } | null>(null);
     const emitFrameRef = useRef<number | null>(null);
+    const overlayElementsRef = useRef<HTMLElement[]>([]);
     const syncSuppressRef = useRef(false);
     const previousSourceKeyRef = useRef("");
     const lastInteractionModeRef = useRef<"fit" | "native" | null>(null);
@@ -150,10 +162,65 @@ export const MediaDeepZoomStage = forwardRef<
     const navigatorVisibleRef = useRef(navigatorVisible);
     const [ready, setReady] = useState(false);
 
+    const defaultModeRef = useRef(defaultMode);
+    useEffect(() => {
+      defaultModeRef.current = defaultMode;
+    }, [defaultMode]);
+
     const sourceKey = useMemo(
       () => [source.deepzoomUrl ?? "", source.previewSrc ?? "", source.fullSrc ?? ""].join("|"),
       [source.deepzoomUrl, source.previewSrc, source.fullSrc]
     );
+    const overlaysKey = useMemo(() => JSON.stringify(overlays), [overlays]);
+
+    const clearOverlays = (viewer: any) => {
+      for (const element of overlayElementsRef.current) {
+        try {
+          viewer?.removeOverlay?.(element);
+        } catch {}
+      }
+      overlayElementsRef.current = [];
+    };
+
+    const renderOverlays = (viewer: any) => {
+      clearOverlays(viewer);
+      if (!overlays.length) {
+        return;
+      }
+      const item = viewer?.world?.getItemAt?.(0);
+      if (!item || !viewer?.viewport) {
+        return;
+      }
+      for (const overlay of overlays) {
+        const element = document.createElement("div");
+        element.style.border = "2px solid rgba(255, 94, 91, 0.95)";
+        element.style.borderRadius = "12px";
+        element.style.boxShadow = "0 0 0 1px rgba(16, 18, 24, 0.45)";
+        element.style.background = "rgba(255, 94, 91, 0.06)";
+        element.style.pointerEvents = "none";
+        element.style.position = "relative";
+        if (overlay.label) {
+          const badge = document.createElement("span");
+          badge.textContent = overlay.label;
+          badge.style.position = "absolute";
+          badge.style.top = "-1.6rem";
+          badge.style.left = "0";
+          badge.style.padding = "0.2rem 0.45rem";
+          badge.style.borderRadius = "999px";
+          badge.style.background = "rgba(255, 94, 91, 0.96)";
+          badge.style.color = "#fff";
+          badge.style.fontSize = "0.72rem";
+          badge.style.whiteSpace = "nowrap";
+          badge.style.fontWeight = "600";
+          element.appendChild(badge);
+        }
+        viewer.addOverlay({
+          element,
+          location: viewer.viewport.imageToViewportRectangle(overlay.x, overlay.y, overlay.width, overlay.height),
+        });
+        overlayElementsRef.current.push(element);
+      }
+    };
 
     const emitViewerState = () => {
       const viewer = viewerRef.current;
@@ -182,7 +249,8 @@ export const MediaDeepZoomStage = forwardRef<
     };
 
     const applyDefaultMode = (viewer: any) => {
-      const resolvedMode = defaultMode === "auto" ? (isMobileViewport() ? "fit" : "native") : defaultMode;
+      const mode = defaultModeRef.current;
+      const resolvedMode = mode === "auto" ? "fit" : mode;
       if (resolvedMode === "native") {
         actualSizeViewer(viewer);
         lastInteractionModeRef.current = "native";
@@ -297,7 +365,7 @@ export const MediaDeepZoomStage = forwardRef<
           visibilityRatio: 1,
           springStiffness: 8,
           maxZoomPixelRatio: 3.5,
-          minZoomImageRatio: 0.9,
+          minZoomImageRatio: 0.1, // Allow fitting large images
           gestureSettingsMouse: {
             clickToZoom: false,
             dblClickToZoom: false,
@@ -327,8 +395,11 @@ export const MediaDeepZoomStage = forwardRef<
               scheduleEmitViewerState();
             });
           } else {
-            applyDefaultMode(viewer);
-            scheduleEmitViewerState();
+            // Use requestAnimationFrame to ensure the container size is settled
+            window.requestAnimationFrame(() => {
+              applyDefaultMode(viewer);
+              scheduleEmitViewerState();
+            });
           }
           onSourceReady?.();
         });
@@ -356,6 +427,7 @@ export const MediaDeepZoomStage = forwardRef<
           window.cancelAnimationFrame(emitFrameRef.current);
           emitFrameRef.current = null;
         }
+        clearOverlays(viewerRef.current);
         viewerRef.current?.destroy?.();
         viewerRef.current = null;
       };
@@ -415,6 +487,20 @@ export const MediaDeepZoomStage = forwardRef<
     }, [ready, source.deepzoomUrl, source.previewSrc, source.fullSrc, sourceKey]);
 
     useEffect(() => {
+      if (!ready || !viewerRef.current) {
+        return;
+      }
+      const viewer = viewerRef.current;
+      const apply = () => renderOverlays(viewer);
+      apply();
+      viewer.addHandler("open", apply);
+      return () => {
+        viewer.removeHandler?.("open", apply);
+        clearOverlays(viewer);
+      };
+    }, [ready, overlaysKey, sourceKey]);
+
+    useEffect(() => {
       if (!ready || !viewerRef.current || !syncedViewportState) {
         return;
       }
@@ -463,8 +549,9 @@ export const MediaDeepZoomViewer = forwardRef<
     alt: string;
     className?: string;
     defaultMode?: "auto" | "native" | "fit";
+    overlays?: DeepZoomOverlay[];
   }
->(({ source, alt, className = "", defaultMode = "auto" }, ref) => {
+>(({ source, alt, className = "", defaultMode = "auto", overlays = [] }, ref) => {
   const stageRef = useRef<MediaDeepZoomViewerHandle | null>(null);
   const [scalePercent, setScalePercent] = useState(100);
   const [navigatorVisible, setNavigatorVisible] = useState(true);
@@ -525,6 +612,7 @@ export const MediaDeepZoomViewer = forwardRef<
         defaultMode={defaultMode}
         navigatorVisible={navigatorVisible}
         onScalePercentChange={setScalePercent}
+        overlays={overlays}
       />
     </div>
   );

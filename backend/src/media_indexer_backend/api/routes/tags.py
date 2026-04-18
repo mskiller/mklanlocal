@@ -6,9 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from media_indexer_backend.api.dependencies import get_session, require_authenticated, require_admin
+from media_indexer_backend.api.dependencies import get_session, require_admin, require_authenticated, require_curation_access, require_enabled_module
 from media_indexer_backend.models.enums import MediaType
 from media_indexer_backend.models.tables import Asset, User, TagVocabularyEntry, TagSuggestion, AssetTag
+from media_indexer_backend.platform.events import publish_event
 from media_indexer_backend.schemas.asset import AssetListResponse, TagCount
 from media_indexer_backend.schemas.tags import (
     RelatedTagRead,
@@ -22,6 +23,7 @@ from media_indexer_backend.schemas.tags import (
     TagVocabularyRead,
 )
 from media_indexer_backend.services.asset_service import get_asset_or_404, get_assets_for_tag, list_tags
+from media_indexer_backend.services.curation_service import log_curation_event
 from media_indexer_backend.services.image_enrichment import get_image_enrichment_service
 from media_indexer_backend.services.metadata import canonicalize_tag
 from media_indexer_backend.services.path_safety import resolve_asset_path
@@ -53,6 +55,7 @@ def get_tag_assets(
 @router.get("/tags/vocabulary", response_model=list[TagVocabularyRead])
 def get_tag_vocabulary(
     session: Session = Depends(get_session),
+    _: None = Depends(require_enabled_module("ai_tagging")),
     current_user: User = Depends(require_admin),
 ) -> list[TagVocabularyRead]:
     entries = session.execute(select(TagVocabularyEntry).order_by(TagVocabularyEntry.tag)).scalars().all()
@@ -63,6 +66,7 @@ def get_tag_vocabulary(
 def create_tag_vocabulary_entry(
     payload: TagVocabularyCreate,
     session: Session = Depends(get_session),
+    _: None = Depends(require_enabled_module("ai_tagging")),
     current_user: User = Depends(require_admin),
 ) -> TagVocabularyRead:
     normalized_tag = canonicalize_tag(payload.tag)
@@ -86,6 +90,7 @@ def create_tag_vocabulary_entry(
 
 @router.get("/tags/providers", response_model=TagProvidersResponse)
 def get_tag_providers(
+    _: None = Depends(require_enabled_module("ai_tagging")),
     current_user: User = Depends(require_admin),
 ) -> TagProvidersResponse:
     del current_user
@@ -95,6 +100,7 @@ def get_tag_providers(
 
 @router.post("/tags/providers/preload", response_model=TagProvidersResponse)
 def preload_tag_providers(
+    _: None = Depends(require_enabled_module("ai_tagging")),
     current_user: User = Depends(require_admin),
 ) -> TagProvidersResponse:
     del current_user
@@ -106,6 +112,7 @@ def preload_tag_providers(
 def rebuild_asset_tags(
     payload: TagRebuildRequest,
     session: Session = Depends(get_session),
+    _: None = Depends(require_enabled_module("ai_tagging")),
     current_user: User = Depends(require_admin),
 ) -> TagRebuildResponse:
     del current_user
@@ -151,6 +158,7 @@ def get_related_tags(
     tag: str,
     limit: int = Query(default=12, ge=1, le=50),
     session: Session = Depends(get_session),
+    _: None = Depends(require_enabled_module("ai_tagging")),
     current_user: User = Depends(require_authenticated),
 ) -> list[RelatedTagRead]:
     del session, current_user
@@ -162,6 +170,7 @@ def get_related_tags(
 def get_asset_suggestions(
     asset_id: UUID,
     session: Session = Depends(get_session),
+    _: None = Depends(require_enabled_module("ai_tagging")),
     current_user: User = Depends(require_authenticated),
 ) -> list[TagSuggestionRead]:
     get_asset_or_404(session, asset_id, current_user=current_user)
@@ -177,7 +186,8 @@ def get_asset_suggestions(
 def post_suggestion_action(
     payload: TagSuggestionAction,
     session: Session = Depends(get_session),
-    current_user: User = Depends(require_authenticated),
+    _: None = Depends(require_enabled_module("ai_tagging")),
+    current_user: User = Depends(require_curation_access),
 ) -> dict[str, str]:
     suggestion = session.get(TagSuggestion, payload.suggestion_id)
     if not suggestion:
@@ -191,8 +201,23 @@ def post_suggestion_action(
         if not exists:
             session.add(AssetTag(asset_id=suggestion.asset_id, tag=suggestion.tag))
         suggestion.status = "accepted"
+        log_curation_event(
+            session,
+            user_id=current_user.id,
+            asset_id=suggestion.asset_id,
+            event_type="tag.accept",
+            details_json={"tag": suggestion.tag, "suggestion_id": suggestion.id},
+        )
+        publish_event(
+            session,
+            "tag.accepted",
+            {
+                "user_id": str(current_user.id),
+                "asset_id": str(suggestion.asset_id),
+                "tag": suggestion.tag,
+            },
+        )
     else:
         suggestion.status = "rejected"
-        
     session.commit()
     return {"status": "success"}

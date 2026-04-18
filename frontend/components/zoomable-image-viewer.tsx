@@ -3,6 +3,7 @@
 import { forwardRef } from "react";
 
 import {
+  DeepZoomOverlay,
   MediaDeepZoomSource,
   MediaDeepZoomViewer,
   MediaDeepZoomViewerHandle,
@@ -19,14 +20,15 @@ export const ZoomableImageViewer = forwardRef<
     deepzoomUrl?: string | null;
     alt: string;
     defaultMode?: "auto" | "native" | "fit";
+    overlays?: DeepZoomOverlay[];
   }
->(({ src, previewSrc, contentSrc, deepzoomUrl, alt, defaultMode = "auto" }, ref) => {
+>(({ src, previewSrc, contentSrc, deepzoomUrl, alt, defaultMode = "auto", overlays = [] }, ref) => {
   const source: MediaDeepZoomSource = {
     previewSrc: previewSrc ?? src ?? contentSrc ?? null,
     fullSrc: contentSrc ?? src ?? previewSrc ?? null,
     deepzoomUrl: deepzoomUrl ?? null,
   };
-  return <MediaDeepZoomViewer ref={ref} source={source} alt={alt} defaultMode={defaultMode} />;
+  return <MediaDeepZoomViewer ref={ref} source={source} alt={alt} defaultMode={defaultMode} overlays={overlays} />;
 });
 
 ZoomableImageViewer.displayName = "ZoomableImageViewer";

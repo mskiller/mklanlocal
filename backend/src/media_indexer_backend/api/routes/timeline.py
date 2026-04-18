@@ -7,12 +7,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select, desc
 from sqlalchemy.orm import Session, selectinload
 
-from media_indexer_backend.api.dependencies import get_session, require_authenticated
+from media_indexer_backend.api.dependencies import get_session, require_authenticated, require_enabled_module
 from media_indexer_backend.models.tables import Asset, User
 from media_indexer_backend.schemas.asset import AssetListResponse
 from media_indexer_backend.services.asset_service import _allowed_source_ids, _apply_source_scope, _asset_summary
 
-router = APIRouter(prefix="/timeline", tags=["timeline"])
+router = APIRouter(prefix="/timeline", tags=["timeline"], dependencies=[Depends(require_enabled_module("timeline"))])
 
 
 def _timeline_date_expression():
@@ -39,6 +39,7 @@ def get_timeline_years(
     query = query.group_by(year_expr).order_by(desc(year_expr))
     results = session.execute(query).fetchall()
     return [{"year": int(r.year), "count": r.count} for r in results if r.year is not None]
+
 
 @router.get("/months")
 def get_timeline_months(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import tempfile
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -24,11 +25,13 @@ from media_indexer_backend.schemas.source import (
     SourceTreeFileEntry,
     SourceTreeResponse,
 )
-from media_indexer_backend.services.extractors import extract_exiftool
+from media_indexer_backend.schemas.image_ops import CropSpec
+from media_indexer_backend.services.extractors import extract_exiftool, extract_png_metadata_from_file
 from media_indexer_backend.services.metadata import METADATA_SCHEMA_VERSION, detect_media_type, guess_mime_type, metadata_version
-from media_indexer_backend.services.path_safety import resolve_asset_path, resolve_directory_path, resolve_writable_directory_path, validate_source_root
+from media_indexer_backend.services.path_safety import normalize_relative_path, resolve_asset_path, resolve_directory_path, resolve_writable_directory_path, validate_source_root
 from media_indexer_backend.services.metadata import normalize_metadata, prompt_excerpt, prompt_tag_string, prompt_tags_from_normalized
 from media_indexer_backend.services.user_service import capabilities_for_user
+from media_indexer_backend.services.vips_image_service import crop_output_extension, render_cropped_image_bytes
 
 
 def _allowed_source_ids(session: Session, current_user: User | None):
@@ -327,6 +330,9 @@ def inspect_source_entry(session: Session, source_id, relative_path: str, curren
         )
 
     exif = extract_exiftool(asset_path)
+    if asset_path.suffix.lower() == ".png":
+        for key, value in extract_png_metadata_from_file(asset_path).items():
+            exif.setdefault(key, value)
     normalized = normalize_metadata(media_type=MediaType.IMAGE, exif=exif, ffprobe=None)
     tags = prompt_tags_from_normalized(normalized)
     return SourceBrowseInspect(
@@ -398,6 +404,12 @@ def _unique_upload_path(directory: Path, filename: str) -> Path:
     return directory / f"{stem}-{uuid4().hex[:8]}{suffix}"
 
 
+def _derived_crop_filename(filename: str) -> str:
+    base = Path(_safe_upload_filename(filename))
+    suffix = crop_output_extension(base.name)
+    return f"{base.stem}-crop{suffix}"
+
+
 def upload_images_to_source(
     session: Session,
     source_id,
@@ -405,39 +417,111 @@ def upload_images_to_source(
     folder: str | None,
     files: list[UploadFile],
 ) -> SourceUploadRead:
+    from media_indexer_backend.services.inbox_service import ingest_uploads_to_inbox
+
     settings = get_settings()
     source = get_source_or_404(session, source_id)
     if source.name != settings.upload_source_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploads are only allowed into the system upload source.")
     if not files:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one image to upload.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one media file to upload.")
 
-    target_directory, normalized_folder = resolve_writable_directory_path(source.root_path, folder)
-    target_directory.mkdir(parents=True, exist_ok=True)
-
-    uploaded_files: list[str] = []
-    for upload in files:
-        filename = _safe_upload_filename(upload.filename or "")
-        media_type = detect_media_type(Path(filename), upload.content_type or guess_mime_type(Path(filename)))
-        if media_type != MediaType.IMAGE:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"{filename} is not a supported image file.",
-            )
-        destination = _unique_upload_path(target_directory, filename)
-        content = upload.file.read()
-        if not content:
-            continue
-        destination.write_bytes(content)
-        relative_path = destination.relative_to(Path(source.root_path).resolve(strict=True)).as_posix()
-        uploaded_files.append(relative_path)
-
-    if not uploaded_files:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No image content was uploaded.")
+    inbox_items = ingest_uploads_to_inbox(session, folder=folder, files=files)
 
     return SourceUploadRead(
         source_id=source.id,
+        folder=normalize_relative_path(folder),
+        uploaded_files=[item.inbox_path for item in inbox_items],
+        scan_job_id=None,
+    )
+
+
+def upload_edited_image_to_source(
+    session: Session,
+    source_id,
+    *,
+    folder: str | None,
+    file: UploadFile,
+    crop_spec: CropSpec,
+) -> SourceUploadRead:
+    from media_indexer_backend.services.inbox_service import ingest_generated_file_to_inbox
+
+    settings = get_settings()
+    source = get_source_or_404(session, source_id)
+    if source.name != settings.upload_source_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploads are only allowed into the system upload source.")
+
+    filename = _safe_upload_filename(file.filename or "")
+    media_type = detect_media_type(Path(filename), file.content_type or guess_mime_type(Path(filename)))
+    if media_type != MediaType.IMAGE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Edited uploads only support image files.")
+
+    content = file.file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file did not contain any data.")
+
+    suffix = Path(filename).suffix or ".png"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+        handle.write(content)
+        temp_path = Path(handle.name)
+
+    try:
+        derived_filename = _derived_crop_filename(filename)
+        cropped_bytes = render_cropped_image_bytes(
+            temp_path,
+            crop_spec,
+            output_format=Path(derived_filename).suffix,
+        )
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+    inbox_item = ingest_generated_file_to_inbox(
+        session,
+        folder=folder,
+        filename=derived_filename,
+        content=cropped_bytes,
+    )
+    return SourceUploadRead(
+        source_id=source.id,
+        folder=normalize_relative_path(folder),
+        uploaded_files=[inbox_item.inbox_path],
+        scan_job_id=None,
+    )
+
+
+def create_asset_crop_draft(
+    session: Session,
+    asset_id,
+    *,
+    folder: str | None,
+    crop_spec: CropSpec,
+    current_user: User | None = None,
+) -> SourceUploadRead:
+    from media_indexer_backend.services.asset_service import get_asset_or_404
+    from media_indexer_backend.services.inbox_service import _upload_source, ingest_generated_file_to_inbox
+
+    asset = get_asset_or_404(session, asset_id, current_user=current_user)
+    if asset.media_type != MediaType.IMAGE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only image assets can be cropped into draft uploads.")
+
+    source_path = resolve_asset_path(asset.source.root_path, asset.relative_path)
+    upload_source = _upload_source(session)
+    derived_filename = _derived_crop_filename(asset.filename)
+    cropped_bytes = render_cropped_image_bytes(
+        source_path,
+        crop_spec,
+        output_format=Path(derived_filename).suffix,
+    )
+    normalized_folder = folder if folder is not None else "explorer-crops"
+    inbox_item = ingest_generated_file_to_inbox(
+        session,
         folder=normalized_folder,
-        uploaded_files=uploaded_files,
+        filename=derived_filename,
+        content=cropped_bytes,
+    )
+    return SourceUploadRead(
+        source_id=upload_source.id,
+        folder=normalize_relative_path(normalized_folder),
+        uploaded_files=[inbox_item.inbox_path],
         scan_job_id=None,
     )

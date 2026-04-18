@@ -11,9 +11,11 @@ import { CollectionPickerModal } from "@/components/collection-picker-modal";
 import { GalleryTile } from "@/components/gallery-tile";
 import { ImageExplorerOverlay } from "@/components/image-explorer-overlay";
 import { JustifiedGallery } from "@/components/justified-gallery";
+import { useModuleRegistry } from "@/components/module-registry-provider";
 import {
   addAssetsToCollection,
   cancelScanJob,
+  createAssetCropDraft,
   createSource,
   fetchCollections,
   fetchScanJobs,
@@ -59,6 +61,7 @@ function compareBrowseEntries(left: SourceBrowseEntry, right: SourceBrowseEntry,
 
 function SourceBrowsePageContent() {
   const { user } = useAuth();
+  const { isModuleEnabled } = useModuleRegistry();
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -86,6 +89,7 @@ function SourceBrowsePageContent() {
   const [collectionBusy, setCollectionBusy] = useState(false);
   const [pendingCollectionAssetIds, setPendingCollectionAssetIds] = useState<string[]>([]);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const collectionsEnabled = isModuleEnabled("collections");
 
   const load = async (silent = false) => {
     if (!silent) {
@@ -120,7 +124,7 @@ function SourceBrowsePageContent() {
   }, [params.id, currentPath]);
 
   useEffect(() => {
-    if (!user?.capabilities.can_manage_collections) {
+    if (!user?.capabilities.can_manage_collections || !collectionsEnabled) {
       return;
     }
     const loadCollections = async () => {
@@ -131,7 +135,7 @@ function SourceBrowsePageContent() {
       }
     };
     void loadCollections();
-  }, [user?.capabilities.can_manage_collections]);
+  }, [user?.capabilities.can_manage_collections, collectionsEnabled]);
 
   const openPath = (nextPath: string) => {
     const href = nextPath ? `/sources/${params.id}?path=${encodeURIComponent(nextPath)}` : `/sources/${params.id}`;
@@ -165,6 +169,7 @@ function SourceBrowsePageContent() {
               : null;
         return {
           key: entry.relative_path,
+          assetId: entry.indexed_asset_id,
           title: entry.name,
           subtitle: [dimensions, inspect?.generator].filter(Boolean).join(" · ") || undefined,
           promptExcerpt: inspect?.prompt_excerpt,
@@ -176,6 +181,8 @@ function SourceBrowsePageContent() {
           detailHref: entry.indexed_asset_id ? `/assets/${entry.indexed_asset_id}` : null,
           similarHref: entry.indexed_asset_id ? `/assets/${entry.indexed_asset_id}/similar` : null,
           sourceContext: entry.relative_path,
+          width: inspect?.width ?? imageSizes[entry.relative_path]?.width ?? null,
+          height: inspect?.height ?? imageSizes[entry.relative_path]?.height ?? null,
           metadataSummary: [
             ...(dimensions ? [{ label: "Dimensions", value: dimensions }] : []),
             ...(entry.modified_at ? [{ label: "Modified", value: formatDate(entry.modified_at) }] : []),
@@ -389,6 +396,16 @@ function SourceBrowsePageContent() {
           }
           setExplorerIndex(next);
         }}
+        onCreateCropDraft={
+          user?.capabilities.can_upload_assets
+            ? async (item, crop) => {
+                if (!item.assetId) {
+                  return;
+                }
+                await createAssetCropDraft(item.assetId, { folder: "explorer-crops", ...crop });
+              }
+            : undefined
+        }
         renderActions={(item) => {
           const entry = visibleFiles.find((candidate) => candidate.relative_path === item.key);
           if (!entry) {
@@ -418,7 +435,7 @@ function SourceBrowsePageContent() {
                 </div>
               ) : null}
               <div className="card-actions">
-                {user?.capabilities.can_manage_collections && indexedAssetId ? (
+                {user?.capabilities.can_manage_collections && collectionsEnabled && indexedAssetId ? (
                   <button
                     type="button"
                     className="button subtle-button small-button"
@@ -631,8 +648,8 @@ function SourceBrowsePageContent() {
             onToggleSelectionMode={() => setSelectionMode((value) => !value)}
             onClearSelection={() => setSelectedAssets([])}
             hint="Tap opens the image. Right click on desktop or long-press on phone for gallery actions and collection shortcuts."
-            canAddToCollection={Boolean(user?.capabilities.can_manage_collections)}
-            onAddToCollection={user?.capabilities.can_manage_collections ? () => openCollectionPicker(selectedAssetIds) : undefined}
+            canAddToCollection={Boolean(user?.capabilities.can_manage_collections) && collectionsEnabled}
+            onAddToCollection={user?.capabilities.can_manage_collections && collectionsEnabled ? () => openCollectionPicker(selectedAssetIds) : undefined}
           />
           <section className={`panel stack browse-controls-panel ${controlsOpen ? "browse-controls-panel-open" : ""}`}>
             <div className="row-between">
@@ -824,7 +841,7 @@ function SourceBrowsePageContent() {
                                   variant: "subtle" as const,
                                 }]
                               : []),
-                            ...(user?.capabilities.can_manage_collections && entry.indexed_asset_id
+                            ...(user?.capabilities.can_manage_collections && collectionsEnabled && entry.indexed_asset_id
                               ? [{
                                   label: "Add to Collection",
                                   onSelect: () => openCollectionPicker([entry.indexed_asset_id!]),

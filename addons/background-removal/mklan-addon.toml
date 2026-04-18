@@ -1,0 +1,68 @@
+id = "background_removal"
+name = "Background Removal"
+version = "0.1.0"
+description = "Generate transparent cutouts and alpha masks from indexed images."
+platform_api_version = "1"
+enabled_by_default = false
+permissions = ["background_removal.read", "background_removal.write"]
+dependencies = []
+
+[entrypoints]
+backend = "mklan_addon_background_removal.backend:register"
+worker = "mklan_addon_background_removal.worker:register"
+frontend = "mklan-addon-background-removal"
+
+[contributions]
+api_mount = "/modules/background_removal"
+user_mount = "/modules/background_removal"
+admin_mount = "/admin/modules/background_removal"
+nav_label = "Background Removal"
+nav_href = "/modules/background_removal"
+nav_order = 81
+admin_nav_label = "Background Removal"
+admin_nav_href = "/admin/modules/background_removal"
+admin_nav_order = 81
+user_visible = true
+admin_visible = true
+
+[[settings.fields]]
+key = "backend"
+label = "Backend"
+type = "string"
+default = "pillow-matte"
+description = "Execution backend label surfaced in the admin console."
+
+[[settings.fields]]
+key = "device"
+label = "Device"
+type = "string"
+default = "cpu"
+description = "Reserved for future GPU-backed cutout engines."
+
+[[settings.fields]]
+key = "output_format"
+label = "Output Format"
+type = "string"
+default = "png"
+description = "Transparent output format for generated cutouts."
+
+[[settings.fields]]
+key = "max_input_size"
+label = "Max Input Size"
+type = "integer"
+default = 4096
+description = "Largest input dimension processed before downscaling."
+
+[[settings.fields]]
+key = "concurrency"
+label = "Concurrency"
+type = "integer"
+default = 2
+description = "Reserved queue concurrency for future worker-backed execution."
+
+[[settings.fields]]
+key = "retention_policy"
+label = "Retention Policy"
+type = "string"
+default = "keep-latest"
+description = "How generated cutouts should be retained."

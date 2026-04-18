@@ -1,6 +1,7 @@
 export type MediaType = "image" | "video" | "unknown";
 export type MatchType = "duplicate" | "semantic" | "tag";
-export type SortField = "relevance" | "created_at" | "modified_at" | "filename" | "rating" | "review_status";
+export type SortField = "relevance" | "created_at" | "indexed_at" | "modified_at" | "filename" | "rating" | "review_status";
+export type SortDirection = "asc" | "desc";
 export type BrowseIndexState = "indexed" | "metadata_refresh_pending" | "processing" | "live_browse";
 export type UserRole = "admin" | "curator" | "guest";
 export type UserStatus = "active" | "disabled" | "locked" | "banned";
@@ -21,9 +22,12 @@ export interface AuthCapabilities {
   can_manage_sources: boolean;
   can_run_scans: boolean;
   can_review_compare: boolean;
+  can_curate_assets: boolean;
   can_reset: boolean;
   can_manage_users: boolean;
   can_manage_collections: boolean;
+  can_manage_shares: boolean;
+  can_manage_smart_albums: boolean;
   can_upload_assets: boolean;
   can_view_admin: boolean;
   allowed_source_ids: string[] | "all";
@@ -109,6 +113,10 @@ export interface ScanJobErrorEntry {
   at: string;
 }
 
+export interface ClearScanJobsResponse {
+  deleted_count: number;
+}
+
 export interface ResetResponse {
   deleted_assets: number;
   deleted_scan_jobs: number;
@@ -171,6 +179,8 @@ export interface AssetSummary {
   ocr_confidence: number | null;
   annotation: AssetAnnotation | null;
   workflow_export_available: boolean;
+  waveform_url: string | null;
+  video_keyframes: string[] | null;
 }
 
 export interface AssetDetail extends AssetSummary {
@@ -184,6 +194,86 @@ export interface AssetDetail extends AssetSummary {
   } | null;
   visual_workflow_confidence?: number | null;
   visual_workflow_updated_at?: string | null;
+}
+
+export interface CharacterCardSummary {
+  asset_id: string;
+  source_id: string;
+  source_name: string;
+  filename: string;
+  relative_path: string;
+  preview_url: string | null;
+  content_url: string;
+  name: string;
+  creator: string | null;
+  description: string | null;
+  spec: string;
+  spec_version: string;
+  tags: string[];
+  extracted_at: string;
+  updated_at: string;
+}
+
+export interface CharacterCardDetail extends CharacterCardSummary {
+  first_message: string | null;
+  message_examples: string | null;
+  personality: string | null;
+  scenario: string | null;
+  creator_notes: string | null;
+  system_prompt: string | null;
+  post_history_instructions: string | null;
+  character_version: string | null;
+  alternate_greetings: string[];
+  group_only_greetings: string[];
+  canonical_card: Record<string, unknown>;
+}
+
+export interface CharacterCardListResponse {
+  items: CharacterCardSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface CharacterCardUpdateRequest {
+  name?: string | null;
+  description?: string | null;
+  personality?: string | null;
+  scenario?: string | null;
+  first_message?: string | null;
+  message_examples?: string | null;
+  creator_notes?: string | null;
+  system_prompt?: string | null;
+  post_history_instructions?: string | null;
+  creator?: string | null;
+  character_version?: string | null;
+  tags?: string[] | null;
+  alternate_greetings?: string[] | null;
+  group_only_greetings?: string[] | null;
+}
+
+export interface AssetFacePerson {
+  id: string;
+  name: string | null;
+}
+
+export interface AssetFace {
+  id: string;
+  asset_id: string;
+  bbox_x1: number;
+  bbox_y1: number;
+  bbox_x2: number;
+  bbox_y2: number;
+  det_score: number;
+  crop_preview_url: string | null;
+  person: AssetFacePerson | null;
+}
+
+export interface AssetFacesResponse {
+  enabled: boolean;
+  image_width: number | null;
+  image_height: number | null;
+  items: AssetFace[];
 }
 
 export interface AssetListResponse {
@@ -231,6 +321,9 @@ export interface AssetBrowseItem {
   ocr_text: string | null;
   annotation: AssetAnnotation | null;
   workflow_export_available: boolean;
+  media_type: MediaType;
+  waveform_url: string | null;
+  video_keyframes: string[] | null;
 }
 
 export interface AssetBrowseResponse {
@@ -365,6 +458,195 @@ export interface SourceUploadResponse {
   scan_job_id: string | null;
 }
 
+export interface CropSpec {
+  rotation_quadrants: number;
+  crop_x: number;
+  crop_y: number;
+  crop_width: number;
+  crop_height: number;
+}
+
+export interface HealthDbStats {
+  connected: boolean;
+  pool_size: number;
+  checked_out: number;
+}
+
+export interface HealthWorkerQueueStats {
+  pending_jobs: number;
+  running_jobs: number;
+}
+
+export interface HealthDiskSource {
+  source_id: string;
+  name: string;
+  path: string;
+  free_gb: number;
+  total_gb: number;
+}
+
+export interface HealthDiskStats {
+  sources: HealthDiskSource[];
+  previews_gb: number;
+}
+
+export interface HealthModelState {
+  loaded: boolean;
+  model_id?: string | null;
+}
+
+export interface ScheduledScan {
+  id: string;
+  source_id: string;
+  source_name: string;
+  cron_expression: string;
+  enabled: boolean;
+  last_triggered_at: string | null;
+  last_job_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminHealthResponse {
+  status: string;
+  db: HealthDbStats;
+  worker_queue: HealthWorkerQueueStats;
+  disk: HealthDiskStats;
+  models: Record<string, HealthModelState>;
+  schedules: Array<{
+    schedule_id: string;
+    source_id: string;
+    source_name: string;
+    cron_expression: string;
+    enabled: boolean;
+    last_run: string | null;
+    last_job_id: string | null;
+    status: string;
+  }>;
+}
+
+export interface WebhookEndpoint {
+  id: string;
+  url: string;
+  events: string[];
+  enabled: boolean;
+  created_at: string;
+  last_delivered_at: string | null;
+  last_status_code: number | null;
+}
+
+export interface ApiTokenSummary {
+  id: string;
+  name: string;
+  token_prefix: string;
+  created_by: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+export interface ApiTokenCreateResponse {
+  token: string;
+  item: ApiTokenSummary;
+}
+
+export interface AddonPreset {
+  id: string;
+  module_id: string;
+  name: string;
+  description: string | null;
+  version: number;
+  is_builtin: boolean;
+  config_json: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AddonArtifact {
+  id: string;
+  module_id: string;
+  job_id: string;
+  asset_id: string | null;
+  preset_id: string | null;
+  status: string;
+  label: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  width: number | null;
+  height: number | null;
+  source_checksum: string | null;
+  params_hash: string;
+  recipe_version: number;
+  metadata_json: Record<string, unknown>;
+  content_url: string;
+  promoted_inbox_path: string | null;
+  promoted_at: string | null;
+  created_at: string;
+}
+
+export interface AddonJob {
+  id: string;
+  module_id: string;
+  created_by: string;
+  preset_id: string | null;
+  scope_type: string;
+  scope_json: Record<string, unknown>;
+  params_json: Record<string, unknown>;
+  status: string;
+  progress: number;
+  message: string | null;
+  error_message: string | null;
+  artifact_count: number;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+  artifacts: AddonArtifact[];
+}
+
+export interface GeoFeatureCollection {
+  type: "FeatureCollection";
+  features: Array<{
+    type: "Feature";
+    geometry: {
+      type: "Point";
+      coordinates: [number, number];
+    };
+    properties: {
+      id: string;
+      thumbnail_url: string | null;
+      filename: string;
+      taken_at: string | null;
+    };
+  }>;
+}
+
+export interface InboxItem {
+  id: string;
+  filename: string;
+  inbox_path: string;
+  file_size: number;
+  phash: string | null;
+  clip_distance_min: number | null;
+  nearest_asset_id: string | null;
+  status: string;
+  target_source_id: string | null;
+  target_source_name: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  error_message: string | null;
+  thumbnail_url: string | null;
+}
+
+export interface InboxCompareResponse {
+  item: InboxItem;
+  nearest_asset: AssetSummary | null;
+}
+
 export interface CollectionSummary {
   id: string;
   name: string;
@@ -380,6 +662,56 @@ export interface CollectionDetail extends CollectionSummary {
   page: number;
   page_size: number;
   total: number;
+}
+
+export interface PersonSummary {
+  id: string;
+  name: string | null;
+  cover_face_url: string | null;
+  face_count: number;
+  asset_count: number;
+  created_at: string;
+}
+
+export interface PersonDetail extends PersonSummary {
+  faces: AssetFace[];
+  items: AssetBrowseItem[];
+}
+
+export interface SmartAlbumRule {
+  media_type?: MediaType | null;
+  source_ids: string[];
+  tags_any: string[];
+  auto_tags_any: string[];
+  people_ids: string[];
+  review_status?: ReviewStatus | null;
+  min_rating?: number | null;
+  flagged?: boolean | null;
+  has_gps?: boolean | null;
+  date_from?: string | null;
+  date_to?: string | null;
+}
+
+export interface SmartAlbumSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  owner_id: string;
+  enabled: boolean;
+  last_synced_at: string | null;
+  asset_count: number;
+  cover_asset_id: string | null;
+  source: string;
+  status: string;
+  degraded_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  rule: SmartAlbumRule;
+}
+
+export interface SmartAlbumDetail extends SmartAlbumSummary {
+  items: AssetBrowseItem[];
+  suggested: boolean;
 }
 
 export interface AdminSettings {
@@ -439,6 +771,7 @@ export interface SearchFilters {
   height_max?: string;
   duration_min?: string;
   duration_max?: string;
+  has_gps?: boolean;
   tags?: string;
   auto_tags?: string;
   exclude_tags?: string;
@@ -464,10 +797,54 @@ export interface SearchFilterFormState {
   height_max: string;
   duration_min: string;
   duration_max: string;
+  has_gps: boolean;
   tags: string;
   auto_tags: string;
   min_rating: string;
   review_status: string;
   flagged: boolean;
   sort: SortField;
+}
+
+export interface ModuleSettingFieldRead {
+  key: string;
+  label: string;
+  type: "boolean" | "string" | "integer" | "number";
+  description: string | null;
+  default: unknown;
+}
+
+export interface PlatformModule {
+  module_id: string;
+  name: string;
+  kind: string;
+  version: string;
+  description: string | null;
+  platform_api_version: string;
+  source_ref: string | null;
+  enabled: boolean;
+  status: string;
+  error: string | null;
+  permissions: string[];
+  dependencies: string[];
+  backend_entrypoint: string | null;
+  worker_entrypoint: string | null;
+  frontend_entrypoint: string | null;
+  backend_migrations: string | null;
+  api_mount: string | null;
+  user_mount: string | null;
+  admin_mount: string | null;
+  nav_label: string | null;
+  nav_href: string | null;
+  nav_order: number;
+  admin_nav_label: string | null;
+  admin_nav_href: string | null;
+  admin_nav_order: number;
+  user_visible: boolean;
+  admin_visible: boolean;
+  settings_schema: ModuleSettingFieldRead[];
+  settings_json: Record<string, unknown>;
+  manifest_path: string | null;
+  installed_at: string;
+  updated_at: string;
 }

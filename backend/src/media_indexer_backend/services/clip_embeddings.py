@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 
 from media_indexer_backend.core.config import get_settings
+from media_indexer_backend.platform.runtime import get_ai_tagging_runtime_settings
 
 
 logger = logging.getLogger(__name__)
@@ -28,10 +29,12 @@ class ClipEmbeddingService:
         return self._load()
 
     def _load(self) -> bool:
-        if not self.settings.clip_enabled:
+        if not get_ai_tagging_runtime_settings().clip_enabled:
             return False
         if self.is_loaded:
             return True
+        if self._load_failed:
+            return False
         try:
             import torch
             from transformers import CLIPModel, CLIPProcessor
@@ -47,6 +50,24 @@ class ClipEmbeddingService:
             logger.warning("clip model unavailable: %s", exc, extra={"error": str(exc)}, exc_info=True)
             return False
 
+    def _resolve_embedding_tensor(self, output, *, kind: str):
+        assert self._torch is not None
+        if isinstance(output, self._torch.Tensor):
+            return output
+        for attribute in (
+            f"{kind}_embeds",
+            "image_embeds",
+            "text_embeds",
+            "pooler_output",
+            "last_hidden_state",
+        ):
+            value = getattr(output, attribute, None)
+            if isinstance(value, self._torch.Tensor):
+                if attribute == "last_hidden_state" and value.ndim >= 3:
+                    return value[:, 0, :]
+                return value
+        raise AttributeError(f"Cannot extract embedding tensor from {type(output).__name__}")
+
     def embed_image(self, path: Path) -> list[float] | None:
         if not self._load():
             return None
@@ -60,14 +81,7 @@ class ClipEmbeddingService:
                 inputs = {key: value.to(self.settings.clip_device) for key, value in inputs.items()}
                 with self._torch.no_grad():
                     output = self._model.get_image_features(**inputs)
-                    if isinstance(output, self._torch.Tensor):
-                        embedding = output
-                    elif hasattr(output, "image_embeds"):
-                        embedding = output.image_embeds
-                    elif hasattr(output, "pooler_output"):
-                        embedding = output.pooler_output
-                    else:
-                        raise AttributeError(f"Cannot extract embedding from {type(output).__name__}: {list(vars(output).keys())}")
+                    embedding = self._resolve_embedding_tensor(output, kind="image")
                     embedding = embedding / embedding.norm(dim=-1, keepdim=True)
                 return embedding[0].detach().cpu().numpy().astype(np.float32).tolist()
         except Exception as exc:  # noqa: BLE001
@@ -85,6 +99,7 @@ class ClipEmbeddingService:
             inputs = {key: value.to(self.settings.clip_device) for key, value in inputs.items()}
             with self._torch.no_grad():
                 output = self._model.get_text_features(**inputs)
+                output = self._resolve_embedding_tensor(output, kind="text")
                 embedding = output / output.norm(dim=-1, keepdim=True)
             return embedding[0].detach().cpu().numpy().astype(np.float32).tolist()
         except Exception as exc:  # noqa: BLE001

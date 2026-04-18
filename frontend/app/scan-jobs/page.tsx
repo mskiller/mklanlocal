@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { useAuth } from "@/components/auth-provider";
+import { ScanJobsControls } from "@/components/scan-jobs-controls";
 import { cancelScanJob, fetchScanJobs } from "@/lib/api";
 import { ScanJob } from "@/lib/types";
 
@@ -16,7 +17,8 @@ export default function ScanJobsPage() {
 
   const load = async () => {
     try {
-      setJobs(await fetchScanJobs());
+      setJobs(await fetchScanJobs({ cache: "no-store" }));
+      setError(null);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Unable to load scan jobs.");
     }
@@ -24,17 +26,55 @@ export default function ScanJobsPage() {
 
   useEffect(() => {
     void load();
-    const interval = window.setInterval(() => {
+    const refresh = () => {
       void load();
+    };
+    const interval = window.setInterval(() => {
+      refresh();
     }, 5000);
-    return () => window.clearInterval(interval);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refresh();
+      }
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, []);
 
+  const terminalJobCount = jobs.filter((job) =>
+    job.status === "completed" || job.status === "failed" || job.status === "cancelled"
+  ).length;
+
   return (
-    <AppShell title="Scan Jobs" description="Track queue state, progress, and scan counters in near real time.">
+    <AppShell
+      title="Scan Jobs"
+      description="Track queue state, progress, and scan counters in near real time."
+      actions={
+        user?.capabilities.can_run_scans ? (
+          <ScanJobsControls
+            terminalCount={terminalJobCount}
+            onCleared={async (deletedCount) => {
+              setError(null);
+              setMessage(
+                deletedCount
+                  ? `Cleared ${deletedCount} finished scan job${deletedCount === 1 ? "" : "s"}.`
+                  : "No finished scan jobs to clear."
+              );
+              await load();
+            }}
+          />
+        ) : null
+      }
+    >
       <section className="panel stack">
         {error ? <p className="subdued">{error}</p> : null}
         {message ? <p className="subdued">{message}</p> : null}
+        {!jobs.length && !error ? <p className="subdued">No scan jobs yet.</p> : null}
         {jobs.map((job) => (
           <article key={job.id} className="job-row">
             <div className="row-between">

@@ -46,4 +46,5 @@ Thumbs.db
 *.db
 .pytest_cache/
 backend/pytest-cache-files-*/
+backend/tests/.tmp-platform-tests/
 infra/docker-compose.override.yml

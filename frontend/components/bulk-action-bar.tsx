@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+
+import { AddonQuickActions } from "@/components/addon-quick-actions";
 import { bulkAnnotateAssets } from "@/lib/api";
 import { ReviewStatus } from "@/lib/types";
 
@@ -64,6 +66,7 @@ export function BulkActionBar({
           🏷️ Add Tag...
         </button>
       </div>
+      <AddonQuickActions assetIds={selectedIds} title="Batch Addons" />
       <button className="button subtle-button small-button" disabled={busy} onClick={onClear}>Clear Selection</button>
     </div>
   );

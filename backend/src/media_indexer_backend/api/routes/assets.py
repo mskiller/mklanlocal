@@ -5,25 +5,31 @@ from datetime import datetime, timezone
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from sqlalchemy import Float, cast, select
 from sqlalchemy.orm import Session
 
-from media_indexer_backend.api.dependencies import get_session, require_authenticated
+from media_indexer_backend.api.dependencies import get_session, require_authenticated, require_curation_access, require_enabled_module, require_upload_access
 from media_indexer_backend.core.config import get_settings
+from media_indexer_backend.models.tables import Asset, AssetMetadata
 from media_indexer_backend.models.tables import User
 from media_indexer_backend.models.enums import MatchType, ReviewStatus
 from media_indexer_backend.schemas.asset import AssetBrowseResponse, AssetDetail, AssetListResponse, BulkAnnotateRequest, SimilarAsset
+from media_indexer_backend.schemas.image_ops import AssetCropDraftCreate
+from media_indexer_backend.schemas.source import SourceUploadRead
 from media_indexer_backend.services.annotation_service import bulk_annotate_assets
-from media_indexer_backend.services.asset_service import browse_assets, get_asset_detail, get_asset_or_404, get_similar_assets, search_assets, search_similar_by_image
+from media_indexer_backend.services.asset_service import _allowed_source_ids, _apply_source_scope, browse_assets, get_asset_detail, get_asset_or_404, get_similar_assets, search_assets, search_similar_by_image
 from media_indexer_backend.services.audit import record_audit_event
 from media_indexer_backend.services.deepzoom import deepzoom_manifest_absolute_path, deepzoom_tile_absolute_path, deepzoom_tiles_absolute_dir
 from media_indexer_backend.services.image_service import ensure_cached_resized_image
 from media_indexer_backend.services.path_safety import resolve_asset_path
+from media_indexer_backend.services.source_service import create_asset_crop_draft
 from media_indexer_backend.services.workflow_export import build_workflow_export
 from media_indexer_backend.services.extractors import extract_png_metadata_from_file
 from media_indexer_backend.services.workflow_extractor import workflow_extractor
 from media_indexer_backend.services.metadata import normalize_metadata
+from media_indexer_backend.services.webhook_service import dispatch_webhook_event
 
 
 router = APIRouter(tags=["assets"])
@@ -44,6 +50,7 @@ def get_assets(
     height_max: int | None = None,
     duration_min: float | None = None,
     duration_max: float | None = None,
+    has_gps: bool | None = None,
     tags: str | None = None,
     auto_tags: str | None = None,
     exclude_tags: str | None = None,
@@ -71,6 +78,7 @@ def get_assets(
         height_max=height_max,
         duration_min=duration_min,
         duration_max=duration_max,
+        has_gps=has_gps,
         tags=[value.strip() for value in (tags or "").split(",") if value.strip()],
         auto_tags=[value.strip() for value in (auto_tags or "").split(",") if value.strip()],
         exclude_tags=[value.strip() for value in (exclude_tags or "").split(",") if value.strip()],
@@ -111,6 +119,55 @@ def get_assets_browse(
     )
 
 
+@router.get("/assets/geo")
+def get_assets_geo(
+    bbox: str | None = None,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_enabled_module("geo")),
+    current_user: User = Depends(require_authenticated),
+):
+    normalized = AssetMetadata.normalized_json
+    query = (
+        select(Asset)
+        .join(AssetMetadata, AssetMetadata.asset_id == Asset.id)
+        .options()
+    )
+    query = query.where(normalized["gps_latitude"].astext.is_not(None), normalized["gps_longitude"].astext.is_not(None))
+    if bbox:
+        min_lon, min_lat, max_lon, max_lat = [float(value.strip()) for value in bbox.split(",")]
+        query = query.where(
+            cast(normalized["gps_longitude"].astext, Float) >= min_lon,
+            cast(normalized["gps_longitude"].astext, Float) <= max_lon,
+            cast(normalized["gps_latitude"].astext, Float) >= min_lat,
+            cast(normalized["gps_latitude"].astext, Float) <= max_lat,
+        )
+    query = _apply_source_scope(query, _allowed_source_ids(session, current_user))
+    assets = session.execute(query.limit(10000)).scalars().all()
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [
+                        float(asset.metadata_record.normalized_json.get("gps_longitude")),
+                        float(asset.metadata_record.normalized_json.get("gps_latitude")),
+                    ],
+                },
+                "properties": {
+                    "id": str(asset.id),
+                    "thumbnail_url": f"/assets/{asset.id}/preview" if asset.preview_path else None,
+                    "filename": asset.filename,
+                    "taken_at": asset.created_at.isoformat() if asset.created_at else None,
+                },
+            }
+            for asset in assets
+            if asset.metadata_record is not None
+        ],
+    }
+
+
 @router.get("/assets/{asset_id}", response_model=AssetDetail)
 def get_asset(
     asset_id: UUID,
@@ -123,11 +180,21 @@ def get_asset(
 @router.get("/assets/{asset_id}/preview")
 def get_asset_preview(
     asset_id: UUID,
+    variant: str | None = Query(default=None),
+    index: int | None = Query(default=None, ge=0, le=20),
     session: Session = Depends(get_session),
     current_user: User = Depends(require_authenticated),
 ) -> FileResponse:
     asset = get_asset_or_404(session, asset_id, current_user=current_user)
     settings = get_settings()
+    if variant == "waveform" and asset.waveform_preview_path:
+        waveform_path = (settings.preview_root_path / asset.waveform_preview_path).resolve(strict=False)
+        if waveform_path.is_relative_to(settings.preview_root_path) and waveform_path.exists():
+            return FileResponse(waveform_path)
+    if variant == "keyframe" and asset.video_keyframes and index is not None and 0 <= index < len(asset.video_keyframes):
+        keyframe_path = (settings.preview_root_path / asset.video_keyframes[index]).resolve(strict=False)
+        if keyframe_path.is_relative_to(settings.preview_root_path) and keyframe_path.exists():
+            return FileResponse(keyframe_path)
     if asset.preview_path:
         preview_path = (settings.preview_root_path / asset.preview_path).resolve(strict=False)
         if preview_path.is_relative_to(settings.preview_root_path) and preview_path.exists():
@@ -176,6 +243,58 @@ def get_asset_content(
     return FileResponse(original_path, filename=asset.filename)
 
 
+def _parse_range_header(range_header: str | None, file_size: int) -> tuple[int, int] | None:
+    if not range_header or not range_header.startswith("bytes="):
+        return None
+    raw_range = range_header.replace("bytes=", "", 1).split(",", 1)[0]
+    start_text, end_text = raw_range.split("-", 1)
+    start = int(start_text) if start_text else 0
+    end = int(end_text) if end_text else file_size - 1
+    start = max(0, min(start, file_size - 1))
+    end = max(start, min(end, file_size - 1))
+    return (start, end)
+
+
+@router.get("/assets/{asset_id}/stream")
+def get_asset_stream(
+    asset_id: UUID,
+    range: str | None = Header(default=None),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_authenticated),
+):
+    asset = get_asset_or_404(session, asset_id, current_user=current_user)
+    original_path = resolve_asset_path(asset.source.root_path, asset.relative_path)
+    file_size = original_path.stat().st_size
+    byte_range = _parse_range_header(range, file_size)
+    if byte_range is None:
+        return FileResponse(original_path, media_type=asset.mime_type, headers={"Accept-Ranges": "bytes"})
+
+    start, end = byte_range
+
+    def iter_file():
+        with original_path.open("rb") as handle:
+            handle.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                chunk = handle.read(min(remaining, 64 * 1024))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(
+        iter_file(),
+        status_code=status.HTTP_206_PARTIAL_CONTENT,
+        media_type=asset.mime_type,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Content-Length": str(end - start + 1),
+            "Content-Disposition": "inline",
+        },
+    )
+
+
 @router.get("/assets/{asset_id}/image")
 def get_asset_image(
     asset_id: UUID,
@@ -196,6 +315,32 @@ def get_asset_image(
         fmt=fmt,
     )
     return FileResponse(cache_path, media_type=f"image/{fmt}", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.post("/assets/{asset_id}/crop-draft", response_model=SourceUploadRead)
+def post_asset_crop_draft(
+    asset_id: UUID,
+    payload: AssetCropDraftCreate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_upload_access),
+) -> SourceUploadRead:
+    response = create_asset_crop_draft(
+        session,
+        asset_id,
+        folder=payload.folder,
+        crop_spec=payload,
+        current_user=current_user,
+    )
+    record_audit_event(
+        session,
+        actor=current_user.username,
+        action="asset.crop_draft",
+        resource_type="asset",
+        resource_id=asset_id,
+        details=response.model_dump() | payload.model_dump(),
+    )
+    session.commit()
+    return response
 
 
 @router.get("/assets/{asset_id}/similar", response_model=list[SimilarAsset])
@@ -223,7 +368,7 @@ def get_asset_similar_by_image(
 def post_assets_bulk_annotate(
     payload: BulkAnnotateRequest,
     session: Session = Depends(get_session),
-    current_user: User = Depends(require_authenticated),
+    current_user: User = Depends(require_curation_access),
 ) -> Response:
     bulk_annotate_assets(session, payload, current_user)
     record_audit_event(
@@ -237,6 +382,8 @@ def post_assets_bulk_annotate(
         },
     )
     session.commit()
+    for asset_id in payload.asset_ids:
+        dispatch_webhook_event("asset.updated", {"asset_id": str(asset_id), "action": "bulk_annotate"})
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -310,7 +457,7 @@ def extract_asset_workflow_from_file(
 def trigger_visual_workflow_extraction(
     asset_id: UUID,
     session: Session = Depends(get_session),
-    current_user: User = Depends(require_authenticated),
+    current_user: User = Depends(require_curation_access),
 ) -> dict:
     """
     Trigger Tesseract-based visual workflow extraction from the asset image.

@@ -3,11 +3,15 @@
 import Link from "next/link";
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
+import { ImageCropperModal } from "@/components/image-cropper-modal";
 import { TagFilterChip } from "@/components/tag-filter-chip";
 import { MediaDeepZoomStage, MediaDeepZoomViewerHandle } from "@/components/media-deep-zoom-viewer";
+import { fetchAssetFaces, mediaUrl } from "@/lib/api";
 import { copyImageToClipboard } from "@/lib/clipboard";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { downloadWorkflow } from "@/lib/api";
+import { useToast } from "@/components/use-toast";
+import { AssetFacesResponse, CropSpec } from "@/lib/types";
 
 export interface ExplorerMetadataEntry {
   label: string;
@@ -16,6 +20,7 @@ export interface ExplorerMetadataEntry {
 
 export interface ExplorerItem {
   key: string;
+  assetId?: string | null;
   title: string;
   subtitle?: string | null;
   promptExcerpt?: string | null;
@@ -29,6 +34,8 @@ export interface ExplorerItem {
   sourceContext?: string | null;
   metadataSummary?: ExplorerMetadataEntry[];
   workflowAvailable?: boolean;
+  width?: number | null;
+  height?: number | null;
 }
 
 export function ImageExplorerOverlay({
@@ -38,6 +45,7 @@ export function ImageExplorerOverlay({
   onClose,
   onActiveIndexChange,
   renderActions,
+  onCreateCropDraft,
 }: {
   open: boolean;
   items: ExplorerItem[];
@@ -45,19 +53,28 @@ export function ImageExplorerOverlay({
   onClose: () => void;
   onActiveIndexChange: (next: number) => void;
   renderActions?: (item: ExplorerItem) => ReactNode;
+  onCreateCropDraft?: (item: ExplorerItem, crop: CropSpec) => Promise<void>;
 }) {
+  const { push } = useToast();
   const viewerRef = useRef<MediaDeepZoomViewerHandle | null>(null);
   const viewerContainerRef = useRef<HTMLDivElement | null>(null);
   const filmstripRef = useRef<HTMLDivElement | null>(null);
+  const forceFitOnNextSourceRef = useRef(true);
   const currentItem = items[activeIndex] ?? null;
   const touchRef = useRef<{ x: number; y: number } | null>(null);
   const [metaPanelOpen, setMetaPanelOpen] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [rotation, setRotation] = useState(0);
-  const [scalePercent, setScalePercent] = useState(100);
+  const [scalePercent, setScalePercent] = useState<number | null>(null);
   const [navigatorVisible, setNavigatorVisible] = useState(true);
   const [copied, setCopied] = useState(false);
   const [toolbarVisible, setToolbarVisible] = useState(true);
+  const [showFaceBoxes, setShowFaceBoxes] = useState(false);
+  const [faceData, setFaceData] = useState<Record<string, AssetFacesResponse>>({});
+  const [zoomMode, setZoomMode] = useState<"fit" | "native">("fit");
+  const [cropModalOpen, setCropModalOpen] = useState(false);
+  const [cropBusy, setCropBusy] = useState(false);
+  const [cropError, setCropError] = useState<string | null>(null);
 
   // Reset rotation when item changes
   useEffect(() => {
@@ -69,7 +86,50 @@ export function ImageExplorerOverlay({
     setMetaPanelOpen(false);
     setShowHelp(false);
     setCopied(false);
+    setZoomMode("fit");
+    setScalePercent(null);
+    setCropModalOpen(false);
+    setCropBusy(false);
+    setCropError(null);
+    forceFitOnNextSourceRef.current = true;
   }, [open, activeIndex]);
+
+  useEffect(() => {
+    if (!open || !currentItem?.key || faceData[currentItem.key]) {
+      return;
+    }
+    let cancelled = false;
+    void fetchAssetFaces(currentItem.key)
+      .then((payload) => {
+        if (!cancelled) {
+          setFaceData((current) => ({ ...current, [currentItem.key]: payload }));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFaceData((current) => ({
+            ...current,
+            [currentItem.key]: { enabled: false, image_width: null, image_height: null, items: [] },
+          }));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, currentItem?.key, faceData]);
+
+  const currentFaceData = currentItem?.key ? faceData[currentItem.key] : undefined;
+  const currentOverlays =
+    showFaceBoxes && currentFaceData?.enabled && currentFaceData.image_width && currentFaceData.image_height
+      ? currentFaceData.items.map((face) => ({
+          id: face.id,
+          x: face.bbox_x1,
+          y: face.bbox_y1,
+          width: face.bbox_x2 - face.bbox_x1,
+          height: face.bbox_y2 - face.bbox_y1,
+          label: face.person?.name ?? "Face",
+        }))
+      : [];
 
   // Scroll active filmstrip item into view
   useEffect(() => {
@@ -160,10 +220,12 @@ export function ImageExplorerOverlay({
         case "0":
           event.preventDefault();
           viewerRef.current?.fit();
+          setZoomMode("fit");
           return;
         case "1":
           event.preventDefault();
           viewerRef.current?.actualSize();
+          setZoomMode("native");
           return;
         case "c":
         case "C":
@@ -195,8 +257,42 @@ export function ImageExplorerOverlay({
     return null;
   }
 
+  const cropDraftAvailable = Boolean(onCreateCropDraft && currentItem.assetId && currentItem.contentSrc);
+
   return (
     <>
+      <ImageCropperModal
+        open={cropModalOpen && cropDraftAvailable}
+        title={currentItem.title}
+        imageSrc={currentItem.contentSrc ?? null}
+        naturalWidth={currentItem.width ?? null}
+        naturalHeight={currentItem.height ?? null}
+        confirmLabel="Create Crop Draft"
+        busyLabel="Creating..."
+        onClose={() => {
+          if (!cropBusy) {
+            setCropModalOpen(false);
+          }
+        }}
+        onConfirm={async ({ crop }) => {
+          if (!onCreateCropDraft || !currentItem.assetId) {
+            return;
+          }
+          setCropBusy(true);
+          setCropError(null);
+          try {
+            await onCreateCropDraft(currentItem, crop);
+            setCropModalOpen(false);
+            push("Crop draft created. Review it in Inbox.");
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Unable to create crop draft.";
+            setCropError(message);
+            push(message, "error");
+          } finally {
+            setCropBusy(false);
+          }
+        }}
+      />
       <button type="button" className="explorer-scrim" aria-label="Close explorer" onClick={onClose} />
       <section className="explorer-overlay">
         <div className="explorer-header">
@@ -223,6 +319,16 @@ export function ImageExplorerOverlay({
             <button type="button" className="button ghost-button small-button" onClick={() => setShowHelp((v) => !v)} title="Keyboard shortcuts">
               ?
             </button>
+            {currentFaceData?.enabled && currentFaceData.items.length ? (
+              <button
+                type="button"
+                className={`button ghost-button small-button ${showFaceBoxes ? "image-toolbar-btn-active" : ""}`}
+                onClick={() => setShowFaceBoxes((value) => !value)}
+                title="Toggle face boxes"
+              >
+                Faces
+              </button>
+            ) : null}
             <button type="button" className="button ghost-button small-button explorer-meta-toggle" onClick={() => setMetaPanelOpen((v) => !v)} title="Toggle info panel">
               <span className="explorer-btn-icon" aria-hidden="true">ℹ</span>
               <span className="explorer-btn-label">{metaPanelOpen ? "Hide" : "Info"}</span>
@@ -296,9 +402,18 @@ export function ImageExplorerOverlay({
                     deepzoomUrl: currentItem.deepzoomUrl ?? null,
                   }}
                   alt={currentItem.title}
-                  defaultMode="fit"
+                  defaultMode={zoomMode}
                   navigatorVisible={navigatorVisible}
                   onScalePercentChange={setScalePercent}
+                  onSourceReady={() => {
+                    if (!forceFitOnNextSourceRef.current) {
+                      return;
+                    }
+                    forceFitOnNextSourceRef.current = false;
+                    viewerRef.current?.fit();
+                    setZoomMode("fit");
+                  }}
+                  overlays={currentOverlays}
                 />
               </div>
             ) : (
@@ -309,11 +424,12 @@ export function ImageExplorerOverlay({
               className={`explorer-floating-toolbar ${toolbarVisible ? '' : 'explorer-floating-toolbar-hidden'}`}
               onMouseEnter={() => setToolbarVisible(true)}
             >
-              <button type="button" className="image-toolbar-btn" title="Fit" onClick={() => viewerRef.current?.fit()}>⊞</button>
-              <button type="button" className="image-toolbar-btn" title="Zoom out" onClick={() => viewerRef.current?.zoomOut()}>−</button>
-              <span className="explorer-toolbar-scale">{scalePercent}%</span>
-              <button type="button" className="image-toolbar-btn" title="Zoom in" onClick={() => viewerRef.current?.zoomIn()}>+</button>
+              <button type="button" className={`image-toolbar-btn ${zoomMode === 'fit' ? 'image-toolbar-btn-active' : ''}`} title="Fit" onClick={() => { viewerRef.current?.fit(); setZoomMode("fit"); }}>⊞</button>
+              <button type="button" className="image-toolbar-btn" title="Zoom out" onClick={() => { viewerRef.current?.zoomOut(); setZoomMode("native"); }}>−</button>
+              <span className="explorer-toolbar-scale">{scalePercent != null ? `${scalePercent}%` : "Fit"}</span>
+              <button type="button" className="image-toolbar-btn" title="Zoom in" onClick={() => { viewerRef.current?.zoomIn(); setZoomMode("native"); }}>+</button>
               <span className="explorer-toolbar-sep" />
+              <button type="button" className={`image-toolbar-btn ${zoomMode === 'native' && scalePercent === 100 ? 'image-toolbar-btn-active' : ''}`} title="Actual size (100%)" onClick={() => { viewerRef.current?.actualSize(); setZoomMode("native"); }}>1</button>
               <button type="button" className="image-toolbar-btn" title={copied ? 'Copied!' : 'Copy image'} onClick={handleCopyImage} disabled={!currentItem.contentSrc}>{copied ? '✓' : '⧉'}</button>
               <button type="button" className="image-toolbar-btn" title="Open original" onClick={handleOpenOriginal} disabled={!currentItem.contentSrc}>↗</button>
               <button type="button" className="image-toolbar-btn" title="Fullscreen" onClick={handleFullscreen}>⤢</button>
@@ -363,6 +479,46 @@ export function ImageExplorerOverlay({
                     <div className="subdued">{entry.value}</div>
                   </div>
                 ))}
+              </div>
+            ) : null}
+            {currentFaceData?.items.length ? (
+              <div className="stack">
+                <strong>Detected Faces</strong>
+                <div className="similarity-scroll">
+                  {currentFaceData.items.map((face) => (
+                    <div key={face.id} className="panel" style={{ minWidth: "132px", padding: "0.45rem" }}>
+                      {face.crop_preview_url ? (
+                        <img
+                          src={mediaUrl(face.crop_preview_url)}
+                          alt={face.person?.name ?? "Face crop"}
+                          style={{ width: "120px", height: "120px", objectFit: "cover", borderRadius: "0.8rem" }}
+                        />
+                      ) : null}
+                      <div style={{ marginTop: "0.35rem" }}>
+                        <strong>{face.person?.name ?? "Unnamed person"}</strong>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {cropDraftAvailable ? (
+              <div className="stack">
+                <p className="eyebrow">Crop Draft</p>
+                <div className="card-actions">
+                  <button
+                    type="button"
+                    className="button subtle-button small-button"
+                    onClick={() => setCropModalOpen(true)}
+                    disabled={cropBusy}
+                  >
+                    {cropBusy ? "Creating..." : "Create Crop Draft"}
+                  </button>
+                  <Link href="/inbox" className="button ghost-button small-button">
+                    Open Inbox
+                  </Link>
+                </div>
+                {cropError ? <p className="subdued">{cropError}</p> : null}
               </div>
             ) : null}
             {renderActions ? <div className="stack">{renderActions(currentItem)}</div> : null}

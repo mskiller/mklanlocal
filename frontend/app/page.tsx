@@ -18,27 +18,63 @@ export default function DashboardPage() {
   const [recentAssets, setRecentAssets] = useState<AssetSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
-    try {
-      const [nextSources, nextJobs, nextAssets] = await Promise.all([
-        fetchSources(),
-        fetchScanJobs(),
-        fetchAssets({
-          sort: "modified_at",
-          page_size: 6,
-          exclude_tags: !nsfwVisible ? "nsfw" : undefined,
-        }),
-      ]);
-      setSources(nextSources);
-      setJobs(nextJobs);
-      setRecentAssets(nextAssets.items);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Unable to load dashboard.");
-    }
-  };
-
   useEffect(() => {
-    void load();
+    let cancelled = false;
+    const noStore = { cache: "no-store" as const };
+
+    const loadDashboard = async () => {
+      try {
+        const [nextSources, nextJobs, nextAssets] = await Promise.all([
+          fetchSources(noStore),
+          fetchScanJobs(noStore),
+          fetchAssets(
+            {
+              sort: "indexed_at",
+              page_size: 6,
+              exclude_tags: !nsfwVisible ? "nsfw" : undefined,
+            },
+            noStore
+          ),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setSources(nextSources);
+        setJobs(nextJobs);
+        setRecentAssets(nextAssets.items);
+        setError(null);
+      } catch (nextError) {
+        if (cancelled) {
+          return;
+        }
+        setError(nextError instanceof Error ? nextError.message : "Unable to load dashboard.");
+      }
+    };
+
+    const refresh = () => {
+      void loadDashboard();
+    };
+
+    refresh();
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        refresh();
+      }
+    }, 15000);
+    const handleFocus = () => refresh();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refresh();
+      }
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [nsfwVisible]);
 
   const runningJobs = jobs.filter((job) => job.status === "running" || job.status === "queued").length;
@@ -99,7 +135,7 @@ export default function DashboardPage() {
           ) : null}
         </div>
         <div className="card-actions">
-            <Link href="/sources" className="button subtle-button small-button">
+          <Link href="/sources" className="button subtle-button small-button">
             Browse Sources
           </Link>
           <Link href="/browse-indexed" className="button ghost-button small-button">

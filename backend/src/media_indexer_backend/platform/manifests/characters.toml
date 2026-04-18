@@ -1,0 +1,22 @@
+id = "characters"
+name = "Characters"
+version = "1.0.0"
+description = "SillyTavern PNG character-card extraction, browsing, and editing."
+platform_api_version = "1"
+kind = "builtin"
+enabled_by_default = true
+permissions = ["characters.read", "characters.write"]
+
+[contributions]
+backend_router = "media_indexer_backend.api.routes.characters:router"
+api_mount = "/modules/characters"
+user_mount = "/characters"
+admin_mount = "/admin/modules/characters"
+nav_label = "Characters"
+nav_href = "/characters"
+nav_order = 75
+user_visible = true
+admin_visible = true
+
+[settings]
+fields = []

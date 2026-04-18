@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from media_indexer_backend.api.dependencies import get_session, require_authenticated
+from media_indexer_backend.api.dependencies import get_session, require_share_access
 from media_indexer_backend.core.config import get_settings
 from media_indexer_backend.models.enums import MediaType
 from media_indexer_backend.models.tables import ShareLink, Asset, Collection, CollectionAsset, User
@@ -159,7 +159,7 @@ def get_share_asset_content(
 def create_share_link(
     payload: ShareLinkCreate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(require_authenticated),
+    current_user: User = Depends(require_share_access),
 ) -> ShareLinkRead:
     # Verify target exists
     if payload.target_type == "asset":

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { AddonQuickActions } from "@/components/addon-quick-actions";
 import { AppShell } from "@/components/app-shell";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { CompareSelectionTray } from "@/components/compare-selection-tray";
@@ -12,10 +13,12 @@ import { GalleryTile } from "@/components/gallery-tile";
 import { ImageExplorerOverlay } from "@/components/image-explorer-overlay";
 import { JustifiedGallery } from "@/components/justified-gallery";
 import { useAuth } from "@/components/auth-provider";
+import { useModuleRegistry } from "@/components/module-registry-provider";
 import { useSettings } from "@/components/settings-provider";
 import {
   addAssetsToCollection,
   bulkAnnotateAssets,
+  createAssetCropDraft,
   downloadWorkflow,
   fetchAssetBrowse,
   fetchCollections,
@@ -38,6 +41,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 export default function BrowseIndexedPage() {
   const router = useRouter();
   const { user } = useAuth();
+  const { isModuleEnabled } = useModuleRegistry();
   const { nsfwVisible } = useSettings();
   const [sources, setSources] = useState<Source[]>([]);
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
@@ -73,13 +77,14 @@ export default function BrowseIndexedPage() {
 
   // M5.7 — Filter scopes
   const [filterScope, setFilterScope] = useState<FilterScope>(null);
+  const collectionsEnabled = isModuleEnabled("collections");
 
   useEffect(() => {
     const loadStatic = async () => {
       try {
         const [nextSources, nextCollections, nextTags] = await Promise.all([
           fetchSources(),
-          user?.capabilities.can_manage_collections ? fetchCollections() : Promise.resolve([]),
+          user?.capabilities.can_manage_collections && collectionsEnabled ? fetchCollections() : Promise.resolve([]),
           fetchTags(),
         ]);
         setSources(nextSources);
@@ -91,7 +96,7 @@ export default function BrowseIndexedPage() {
       }
     };
     void loadStatic();
-  }, [user?.capabilities.can_manage_collections]);
+  }, [user?.capabilities.can_manage_collections, collectionsEnabled]);
 
   // M2 — Detect active scan jobs on mount / sourceId change
   useEffect(() => {
@@ -254,6 +259,7 @@ export default function BrowseIndexedPage() {
     () =>
       displayItems.map((item) => ({
         key: item.id,
+        assetId: item.id,
         title: item.filename,
         subtitle: [item.source_name, item.generator].filter(Boolean).join(" · ") || undefined,
         promptExcerpt: item.prompt_excerpt,
@@ -265,6 +271,8 @@ export default function BrowseIndexedPage() {
         similarHref: `/assets/${item.id}/similar`,
         sourceContext: item.relative_path,
         workflowAvailable: item.workflow_export_available,
+        width: item.width,
+        height: item.height,
         metadataSummary: [
           ...(item.width && item.height ? [{ label: "Dimensions", value: `${item.width} x ${item.height}` }] : []),
           { label: "Modified", value: formatDate(item.modified_at) },
@@ -347,6 +355,16 @@ export default function BrowseIndexedPage() {
           }
         }}
         onActiveIndexChange={(next) => setExplorerIndex(next)}
+        onCreateCropDraft={
+          user?.capabilities.can_upload_assets
+            ? async (item, crop) => {
+                if (!item.assetId) {
+                  return;
+                }
+                await createAssetCropDraft(item.assetId, { folder: "explorer-crops", ...crop });
+              }
+            : undefined
+        }
         renderActions={(item) => {
           const sourceItem = displayItems.find((entry) => entry.id === item.key);
           if (!sourceItem) {
@@ -371,7 +389,7 @@ export default function BrowseIndexedPage() {
                 ) : null}
               </div>
               <div className="card-actions">
-                {user?.capabilities.can_manage_collections ? (
+                {user?.capabilities.can_manage_collections && collectionsEnabled ? (
                   <button
                     type="button"
                     className="button subtle-button small-button"
@@ -396,6 +414,7 @@ export default function BrowseIndexedPage() {
                   Copy Danbooru Tags
                 </button>
               </div>
+              <AddonQuickActions assetId={sourceItem.id} />
               {/* M4 — Generation Tools group */}
               {sourceItem.workflow_export_available ? (
                 <div>
@@ -446,9 +465,9 @@ export default function BrowseIndexedPage() {
         onClearSelection={() => setSelectedAssets([])}
         onRemoveItem={removeSelection}
         hint="This page is for visual browsing only. Hover or long-press for prompt tags, quick actions, and collection shortcuts."
-        canAddToCollection={Boolean(user?.capabilities.can_manage_collections)}
+        canAddToCollection={Boolean(user?.capabilities.can_manage_collections) && collectionsEnabled}
         onAddToCollection={
-          user?.capabilities.can_manage_collections
+          user?.capabilities.can_manage_collections && collectionsEnabled
             ? () => {
                 setPendingCollectionAssetIds(selectedAssets.map((item) => item.id));
                 setCollectionModalOpen(true);
@@ -486,7 +505,7 @@ export default function BrowseIndexedPage() {
           </label>
           <div className="browse-toolbar-group">
             <span className="subdued">Mode</span>
-            <div className="chip-row">
+            <div className="chip-row gallery-filter-chip-row">
               <button className={`button small-button ${displayMode === "gallery" ? "" : "ghost-button"}`} type="button" onClick={() => setDisplayMode("gallery")}>
                 Gallery
               </button>
@@ -502,7 +521,7 @@ export default function BrowseIndexedPage() {
           </div>
           <div className="browse-toolbar-group">
             <span className="subdued">Sort</span>
-            <div className="chip-row">
+            <div className="chip-row gallery-filter-chip-row">
               <button className={`button small-button ${sortMode === "modified_at" ? "" : "ghost-button"}`} type="button" onClick={() => setSortMode("modified_at")}>
                 Modified
               </button>
@@ -663,7 +682,7 @@ export default function BrowseIndexedPage() {
                       ...(compareTarget
                         ? [{ label: "Compare with Selected", onSelect: () => router.push(`/compare?a=${compareTarget.id}&b=${item.id}`), variant: "subtle" as const }]
                         : []),
-                      ...(user?.capabilities.can_manage_collections
+                      ...(user?.capabilities.can_manage_collections && collectionsEnabled
                         ? [{ label: "Add to Collection", onSelect: () => { setPendingCollectionAssetIds([item.id]); setCollectionModalOpen(true); }, variant: "subtle" as const }]
                         : []),
                       {

@@ -10,6 +10,12 @@ from media_indexer_backend.models.enums import ScanStatus, SourceStatus
 from media_indexer_backend.models.tables import ScanJob, Source
 from media_indexer_backend.services.source_service import get_source_or_404, reconcile_source_statuses
 
+TERMINAL_SCAN_STATUSES = (
+    ScanStatus.COMPLETED,
+    ScanStatus.FAILED,
+    ScanStatus.CANCELLED,
+)
+
 
 def queue_scan(session: Session, source_id) -> ScanJob:
     reconcile_source_statuses(session)
@@ -36,7 +42,7 @@ def queue_scan(session: Session, source_id) -> ScanJob:
 
 def cancel_scan_job(session: Session, job_id) -> ScanJob:
     job = get_scan_job_or_404(session, job_id)
-    if job.status in {ScanStatus.COMPLETED, ScanStatus.FAILED, ScanStatus.CANCELLED}:
+    if job.status in TERMINAL_SCAN_STATUSES:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only queued or running jobs can be cancelled.")
 
     was_running = job.status == ScanStatus.RUNNING
@@ -53,6 +59,16 @@ def cancel_scan_job(session: Session, job_id) -> ScanJob:
 
 def list_scan_jobs(session: Session, limit: int = 50) -> list[ScanJob]:
     return session.execute(select(ScanJob).order_by(desc(ScanJob.created_at)).limit(limit)).scalars().all()
+
+
+def clear_terminal_scan_jobs(session: Session) -> int:
+    terminal_jobs = (
+        session.execute(select(ScanJob).where(ScanJob.status.in_(TERMINAL_SCAN_STATUSES))).scalars().all()
+    )
+    for job in terminal_jobs:
+        session.delete(job)
+    session.flush()
+    return len(terminal_jobs)
 
 
 def get_scan_job_or_404(session: Session, job_id) -> ScanJob:

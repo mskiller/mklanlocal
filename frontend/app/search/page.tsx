@@ -11,19 +11,111 @@ import { BulkActionBar } from "@/components/bulk-action-bar";
 import { CompareSelectionTray } from "@/components/compare-selection-tray";
 import { CollectionPickerModal } from "@/components/collection-picker-modal";
 import { FilterSidebar } from "@/components/filter-sidebar";
-import { addAssetsToCollection, addSearchResultsToCollection, downloadWorkflow, fetchCollections, fetchSearch, fetchTags } from "@/lib/api";
+import { useModuleRegistry } from "@/components/module-registry-provider";
+import {
+  addAssetsToCollection,
+  addSearchResultsToCollection,
+  downloadWorkflow,
+  fetchCollections,
+  fetchNaturalLanguageSearch,
+  fetchSearch,
+  fetchTags,
+} from "@/lib/api";
 import { buildSearchQuery, DEFAULT_SEARCH_FILTERS, parseSearchFilterState, parseTagList, removeTagFilter } from "@/lib/search-filters";
 import { useAuth } from "@/components/auth-provider";
 import { useSettings } from "@/components/settings-provider";
-import { AssetListResponse, AssetSummary, CollectionSummary, ReviewStatus, SearchFilterFormState, TagCount } from "@/lib/types";
+import { AssetListResponse, AssetSummary, CollectionSummary, ReviewStatus, SearchFilterFormState, SortDirection, TagCount } from "@/lib/types";
+
+type SearchMode = "tag" | "nl";
+type NaturalSearchSort = "relevance" | "created_at" | "indexed_at" | "modified_at" | "filename";
+
+const DEFAULT_NATURAL_SORT: NaturalSearchSort = "relevance";
+const DEFAULT_NATURAL_SORT_DIRECTION: SortDirection = "desc";
+const NATURAL_SORT_OPTIONS: Array<{ value: NaturalSearchSort; label: string }> = [
+  { value: "relevance", label: "Best Match" },
+  { value: "indexed_at", label: "Latest Indexed" },
+  { value: "created_at", label: "Created Date" },
+  { value: "modified_at", label: "Modified Date" },
+  { value: "filename", label: "Filename" },
+];
+
+function parseNaturalSort(value: string | null): NaturalSearchSort {
+  if (
+    value === "relevance" ||
+    value === "created_at" ||
+    value === "indexed_at" ||
+    value === "modified_at" ||
+    value === "filename"
+  ) {
+    return value;
+  }
+  return DEFAULT_NATURAL_SORT;
+}
+
+function parseSortDirection(value: string | null): SortDirection {
+  return value === "asc" ? "asc" : DEFAULT_NATURAL_SORT_DIRECTION;
+}
+
+function naturalSortDirectionOptions(sort: NaturalSearchSort): Array<{ value: SortDirection; label: string }> {
+  switch (sort) {
+    case "filename":
+      return [
+        { value: "asc", label: "A to Z" },
+        { value: "desc", label: "Z to A" },
+      ];
+    case "created_at":
+    case "indexed_at":
+    case "modified_at":
+      return [
+        { value: "desc", label: "Newest First" },
+        { value: "asc", label: "Oldest First" },
+      ];
+    default:
+      return [
+        { value: "desc", label: "Best Match" },
+        { value: "asc", label: "Least Similar" },
+      ];
+  }
+}
+
+function naturalSortSummary(sort: NaturalSearchSort, direction: SortDirection): string {
+  if (sort === "relevance") {
+    return direction === "desc"
+      ? "Semantic results are ordered by closest visual match."
+      : "Semantic results are reversed from closest to least similar match.";
+  }
+  if (sort === "indexed_at") {
+    return direction === "desc"
+      ? "Closest visual matches are re-ordered by newest index time."
+      : "Closest visual matches are re-ordered by oldest index time.";
+  }
+  if (sort === "created_at") {
+    return direction === "desc"
+      ? "Closest visual matches are re-ordered by newest creation date."
+      : "Closest visual matches are re-ordered by oldest creation date.";
+  }
+  if (sort === "modified_at") {
+    return direction === "desc"
+      ? "Closest visual matches are re-ordered by latest file modification."
+      : "Closest visual matches are re-ordered by earliest file modification.";
+  }
+  return direction === "desc"
+    ? "Closest visual matches are re-ordered from Z to A."
+    : "Closest visual matches are re-ordered from A to Z.";
+}
 
 function SearchPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
+  const { isModuleEnabled } = useModuleRegistry();
   const { nsfwVisible } = useSettings();
   const searchParamKey = searchParams.toString();
   const [filters, setFilters] = useState<SearchFilterFormState>(DEFAULT_SEARCH_FILTERS);
+  const [mode, setMode] = useState<SearchMode>(searchParams.get("mode") === "nl" ? "nl" : "tag");
+  const [naturalQuery, setNaturalQuery] = useState(searchParams.get("nl_q") ?? "");
+  const [naturalSort, setNaturalSort] = useState<NaturalSearchSort>(parseNaturalSort(searchParams.get("nl_sort")));
+  const [naturalSortDirection, setNaturalSortDirection] = useState<SortDirection>(parseSortDirection(searchParams.get("nl_sort_direction")));
   const [results, setResults] = useState<AssetListResponse | null>(null);
   const [tagSuggestions, setTagSuggestions] = useState<TagCount[]>([]);
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
@@ -37,15 +129,31 @@ function SearchPageContent() {
   const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  // v1.6: detect mobile to switch sidebar → BottomSheet for proper touch scroll
   const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
   const [collectionOpen, setCollectionOpen] = useState(false);
   const [collectionBusy, setCollectionBusy] = useState(false);
   const [collectionMode, setCollectionMode] = useState<"selected" | "search-results">("selected");
   const [pendingCollectionAssetIds, setPendingCollectionAssetIds] = useState<string[]>([]);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const collectionsEnabled = isModuleEnabled("collections");
+  const showDesktopSidebar = mode === "tag" && !isMobile;
 
-  const load = async (nextFilters: SearchFilterFormState, nextPage: number, append = false) => {
+  const emptyResults = (pageSize = 24): AssetListResponse => ({
+    items: [],
+    total: 0,
+    page: 1,
+    page_size: pageSize,
+  });
+
+  const load = async (
+    nextFilters: SearchFilterFormState,
+    nextPage: number,
+    append = false,
+    nextMode: SearchMode = mode,
+    nextNaturalQuery: string = naturalQuery,
+    nextNaturalSort: NaturalSearchSort = naturalSort,
+    nextNaturalSortDirection: SortDirection = naturalSortDirection,
+  ) => {
     if (append) {
       setLoadingMore(true);
     } else {
@@ -53,23 +161,36 @@ function SearchPageContent() {
       setError(null);
     }
     try {
-      const apiFilters = {
-        ...nextFilters,
-        page: nextPage,
-        min_rating: nextFilters.min_rating ? Number(nextFilters.min_rating) : undefined,
-        review_status: (nextFilters.review_status as ReviewStatus) || undefined,
-        exclude_tags: !nsfwVisible ? "nsfw" : undefined,
-      };
-      const nextResults = await fetchSearch(apiFilters);
+      let nextResults: AssetListResponse;
+      if (nextMode === "nl") {
+        const query = nextNaturalQuery.trim();
+        nextResults = query
+          ? await fetchNaturalLanguageSearch(query, {
+              limit: 50,
+              sort: nextNaturalSort,
+              sort_direction: nextNaturalSortDirection,
+            })
+          : emptyResults(50);
+        setHasMore(false);
+      } else {
+        const apiFilters = {
+          ...nextFilters,
+          page: nextPage,
+          min_rating: nextFilters.min_rating ? Number(nextFilters.min_rating) : undefined,
+          review_status: (nextFilters.review_status as ReviewStatus) || undefined,
+          exclude_tags: !nsfwVisible ? "nsfw" : undefined,
+        };
+        nextResults = await fetchSearch(apiFilters);
+        setHasMore(nextPage * nextResults.page_size < nextResults.total);
+      }
       setResults((current) =>
-        append && current
+        append && current && nextMode === "tag"
           ? {
               ...nextResults,
               items: [...current.items, ...nextResults.items],
             }
           : nextResults
       );
-      setHasMore(nextPage * nextResults.page_size < nextResults.total);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Unable to load search.");
     } finally {
@@ -93,7 +214,7 @@ function SearchPageContent() {
   }, []);
 
   useEffect(() => {
-    if (!user?.capabilities.can_manage_collections) {
+    if (!user?.capabilities.can_manage_collections || !collectionsEnabled) {
       return;
     }
     const loadCollections = async () => {
@@ -104,31 +225,37 @@ function SearchPageContent() {
       }
     };
     void loadCollections();
-  }, [user?.capabilities.can_manage_collections]);
+  }, [user?.capabilities.can_manage_collections, collectionsEnabled]);
 
   useEffect(() => {
     const nextFilters = parseSearchFilterState(searchParams);
-    // v1.6: If sort=relevance but there's no query, fall back to modified_at so
-    // the page always shows all images on load instead of an empty result set.
+    const nextMode = searchParams.get("mode") === "nl" ? "nl" : "tag";
+    const nextNaturalQuery = searchParams.get("nl_q") ?? "";
+    const nextNaturalSort = parseNaturalSort(searchParams.get("nl_sort"));
+    const nextNaturalSortDirection = parseSortDirection(searchParams.get("nl_sort_direction"));
     if (nextFilters.sort === "relevance" && !nextFilters.q.trim()) {
       nextFilters.sort = "modified_at";
     }
+    setMode(nextMode);
+    setNaturalQuery(nextNaturalQuery);
+    setNaturalSort(nextNaturalSort);
+    setNaturalSortDirection(nextNaturalSortDirection);
     setFilters(nextFilters);
     setPage(1);
     setSelected([]);
-    void load(nextFilters, 1, false);
+    void load(nextFilters, 1, false, nextMode, nextNaturalQuery, nextNaturalSort, nextNaturalSortDirection);
   }, [searchParamKey, nsfwVisible]);
 
   useEffect(() => {
-    if (page === 1) {
+    if (page === 1 || mode === "nl") {
       return;
     }
-    void load(filters, page, true);
-  }, [page]);
+    void load(filters, page, true, mode, naturalQuery, naturalSort, naturalSortDirection);
+  }, [page, mode, naturalQuery, naturalSort, naturalSortDirection]);
 
   useEffect(() => {
     const target = sentinelRef.current;
-    if (!target || !hasMore || loading || loadingMore) {
+    if (!target || mode === "nl" || !hasMore || loading || loadingMore) {
       return;
     }
 
@@ -142,7 +269,7 @@ function SearchPageContent() {
     );
     observer.observe(target);
     return () => observer.disconnect();
-  }, [hasMore, loading, loadingMore, results?.items.length]);
+  }, [hasMore, loading, loadingMore, mode, results?.items.length]);
 
   const toggleSelection = (asset: AssetSummary) => {
     setSelected((current) => {
@@ -163,19 +290,38 @@ function SearchPageContent() {
     setSelected(loadedItems);
   };
 
-  const pushFilters = (nextFilters: SearchFilterFormState) => {
-    const query = buildSearchQuery(nextFilters);
+  const pushSearchState = (
+    nextFilters: SearchFilterFormState,
+    nextMode: SearchMode,
+    nextNaturalQuery: string,
+    nextNaturalSort: NaturalSearchSort,
+    nextNaturalSortDirection: SortDirection,
+  ) => {
+    const params = new URLSearchParams(buildSearchQuery(nextFilters));
+    if (nextMode === "nl") {
+      params.set("mode", "nl");
+    } else {
+      params.delete("mode");
+    }
+    if (nextNaturalQuery.trim()) {
+      params.set("nl_q", nextNaturalQuery.trim());
+    } else {
+      params.delete("nl_q");
+    }
+    params.set("nl_sort", nextNaturalSort);
+    params.set("nl_sort_direction", nextNaturalSortDirection);
+    const query = params.toString();
     router.push(`/search${query ? `?${query}` : ""}`);
   };
 
   const applyFilters = () => {
     setFiltersOpen(false);
-    pushFilters(filters);
+    pushSearchState(filters, mode, naturalQuery, naturalSort, naturalSortDirection);
   };
 
   const resetFilters = () => {
     setFiltersOpen(false);
-    pushFilters({ ...DEFAULT_SEARCH_FILTERS });
+    pushSearchState({ ...DEFAULT_SEARCH_FILTERS }, mode, naturalQuery, naturalSort, naturalSortDirection);
   };
 
   const activeTags = parseTagList(filters.tags);
@@ -191,21 +337,23 @@ function SearchPageContent() {
     filters.width_min || filters.width_max ? `Width: ${filters.width_min || "0"}-${filters.width_max || "any"}` : null,
     filters.height_min || filters.height_max ? `Height: ${filters.height_min || "0"}-${filters.height_max || "any"}` : null,
     filters.duration_min || filters.duration_max ? `Duration: ${filters.duration_min || "0"}-${filters.duration_max || "any"}` : null,
+    filters.has_gps ? "Has GPS" : null,
     filters.sort !== DEFAULT_SEARCH_FILTERS.sort ? `Sort: ${filters.sort}` : null,
   ].filter((value): value is string => Boolean(value));
   const compareHref = selected.length === 2 ? `/compare?a=${selected[0].id}&b=${selected[1].id}` : null;
+  const canAddSearchResults = mode === "tag" && Boolean(user?.capabilities.can_manage_collections) && collectionsEnabled && Boolean(results?.total);
 
   return (
     <AppShell
       title="Search"
-      description="Indexed discovery with metadata filters, prompt tags, and exact tag search. Browse stays separate for live folder exploration."
+      description="Indexed discovery across exact metadata filters and natural-language semantic search."
       actions={
-        compareHref || (user?.capabilities.can_manage_collections && results?.total) ? (
+        compareHref || canAddSearchResults ? (
           <div className="page-actions">
             <Link href="/browse-indexed" className="button subtle-button small-button">
               Browse Indexed
             </Link>
-            {user?.capabilities.can_manage_collections && results?.total ? (
+            {canAddSearchResults ? (
               <button
                 className="button ghost-button small-button"
                 type="button"
@@ -268,9 +416,8 @@ function SearchPageContent() {
           }
         }}
       />
-      <div className="search-layout">
-        {/* v1.6 — Mobile: filters open in a BottomSheet so users can scroll and tap freely */}
-        {isMobile ? (
+      <div className={`search-layout ${showDesktopSidebar ? "" : "search-layout-wide"}`}>
+        {mode === "tag" && isMobile ? (
           <BottomSheet
             open={filtersOpen}
             onClose={() => setFiltersOpen(false)}
@@ -287,7 +434,8 @@ function SearchPageContent() {
               </button>
             </div>
           </BottomSheet>
-        ) : (
+        ) : null}
+        {showDesktopSidebar ? (
           <>
             <button
               type="button"
@@ -316,29 +464,33 @@ function SearchPageContent() {
               </div>
             </aside>
           </>
-        )}
+        ) : null}
         <section className="stack search-results">
-          {bulkMode && bulkSelectedIds.length > 0 && (
+          {bulkMode && bulkSelectedIds.length > 0 ? (
             <BulkActionBar
               selectedIds={bulkSelectedIds}
               onClear={() => setBulkSelectedIds([])}
-              onDone={() => { 
-                setBulkSelectedIds([]); 
-                setBulkMode(false); 
-                void load(filters, 1, false);
+              onDone={() => {
+                setBulkSelectedIds([]);
+                setBulkMode(false);
+                void load(filters, 1, false, mode, naturalQuery, naturalSort, naturalSortDirection);
               }}
             />
-          )}
+          ) : null}
           <CompareSelectionTray
             selectionMode={selectionMode}
             selectedCount={selected.length}
             compareHref={compareHref}
             onToggleSelectionMode={() => setSelectionMode((value) => !value)}
             onClearSelection={() => setSelected([])}
-            hint="Search is metadata-first. Select any number of indexed images for collection work here, and keep exactly two selected when you want to compare."
-            canAddToCollection={Boolean(user?.capabilities.can_manage_collections)}
+            hint={
+              mode === "nl"
+                ? "Natural-language search uses semantic embeddings. Select results for compare or collection work after you find the right visual cluster."
+                : "Metadata search combines exact filters, prompt tags, and review state. Keep exactly two selected when you want to compare."
+            }
+            canAddToCollection={Boolean(user?.capabilities.can_manage_collections) && collectionsEnabled}
             onAddToCollection={
-              user?.capabilities.can_manage_collections
+              user?.capabilities.can_manage_collections && collectionsEnabled
                 ? () => {
                   setCollectionMode("selected");
                   setPendingCollectionAssetIds(selected.map((asset) => asset.id));
@@ -347,36 +499,144 @@ function SearchPageContent() {
                 : undefined
             }
           />
-          {!selectionMode && (
+          <section className="panel stack">
+            <div className="row-between">
+              <div>
+                <p className="eyebrow">Search Mode</p>
+                <h2>{mode === "nl" ? "Natural Language" : "Metadata + Tags"}</h2>
+              </div>
+              <div className="card-actions">
+                <button
+                  type="button"
+                  className={`button small-button ${mode === "tag" ? "" : "ghost-button"}`}
+                  onClick={() => {
+                    setMode("tag");
+                    pushSearchState(filters, "tag", naturalQuery, naturalSort, naturalSortDirection);
+                  }}
+                >
+                  Metadata
+                </button>
+                <button
+                  type="button"
+                  className={`button small-button ${mode === "nl" ? "" : "ghost-button"}`}
+                  onClick={() => {
+                    setMode("nl");
+                    pushSearchState(filters, "nl", naturalQuery, naturalSort, naturalSortDirection);
+                  }}
+                >
+                  Natural Language
+                </button>
+              </div>
+            </div>
+            {mode === "nl" ? (
+              <div className="search-natural-panel">
+                <label className="field search-natural-query">
+                  <span>Describe what you want to find</span>
+                  <input
+                    value={naturalQuery}
+                    onChange={(event) => setNaturalQuery(event.target.value)}
+                    placeholder="red bicycle in a rainy street at dusk"
+                  />
+                </label>
+                <div className="search-natural-controls">
+                  <div className="field-grid search-sort-grid">
+                    <label className="field">
+                      <span>Order Results By</span>
+                      <select
+                        value={naturalSort}
+                        onChange={(event) => setNaturalSort(event.target.value as NaturalSearchSort)}
+                      >
+                        {NATURAL_SORT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Direction</span>
+                      <select
+                        value={naturalSortDirection}
+                        onChange={(event) => setNaturalSortDirection(event.target.value as SortDirection)}
+                      >
+                        {naturalSortDirectionOptions(naturalSort).map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="card-actions">
+                    <button
+                      type="button"
+                      className="button small-button"
+                      onClick={() => pushSearchState(filters, "nl", naturalQuery, naturalSort, naturalSortDirection)}
+                    >
+                      Search by Meaning
+                    </button>
+                    {naturalQuery ? (
+                      <button
+                        type="button"
+                        className="button ghost-button small-button"
+                        onClick={() => {
+                          setNaturalQuery("");
+                          pushSearchState(filters, "nl", "", naturalSort, naturalSortDirection);
+                        }}
+                      >
+                        Clear Query
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="subdued">
+                Use the filter panel for exact metadata, tags, rating, review state, and GPS-aware searches.
+              </p>
+            )}
+          </section>
+          {!selectionMode ? (
             <div className="page-actions results-header" style={{ paddingBottom: "0.5rem" }}>
               <button
                 type="button"
                 className={`button small-button ${bulkMode ? "" : "ghost-button"}`}
-                onClick={() => { setBulkMode((v) => !v); setBulkSelectedIds([]); }}
+                onClick={() => {
+                  setBulkMode((value) => !value);
+                  setBulkSelectedIds([]);
+                }}
               >
                 {bulkMode ? `Bulk Mode (${bulkSelectedIds.length} selected)` : "Bulk Curate"}
               </button>
             </div>
-          )}
+          ) : null}
           <div className="row-between">
             <div>
               <p className="eyebrow">Indexed Results</p>
               <h2>{results?.total ?? 0} assets</h2>
-              <p className="subdued">Prompt tags and normal tags are clickable anywhere in the app and flow back into this search filter set.</p>
+              <p className="subdued">
+                {mode === "nl"
+                  ? naturalSortSummary(naturalSort, naturalSortDirection)
+                  : "Prompt tags and normal tags are clickable anywhere in the app and flow back into this search filter set."}
+              </p>
             </div>
             <div className="card-actions">
               <button className="button ghost-button small-button" type="button" onClick={selectAllLoaded} disabled={!results?.items.length}>
                 Select All Loaded
               </button>
-              <button className="button ghost-button small-button search-filters-button" type="button" onClick={() => setFiltersOpen(true)}>
-                Filters{activeFilters.length || activeTags.length || activeAutoTags.length ? ` (${activeFilters.length + activeTags.length + activeAutoTags.length})` : ""}
-              </button>
-              <button className="button small-button desktop-filter-apply" type="button" onClick={applyFilters}>
-                Apply Filters
-              </button>
+              {mode === "tag" ? (
+                <>
+                  <button className="button ghost-button small-button search-filters-button" type="button" onClick={() => setFiltersOpen(true)}>
+                    Filters{activeFilters.length || activeTags.length || activeAutoTags.length ? ` (${activeFilters.length + activeTags.length + activeAutoTags.length})` : ""}
+                  </button>
+                  <button className="button small-button desktop-filter-apply" type="button" onClick={applyFilters}>
+                    Apply Filters
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
-          {activeFilters.length || activeTags.length || activeAutoTags.length ? (
+          {mode === "tag" && (activeFilters.length || activeTags.length || activeAutoTags.length) ? (
             <section className="panel stack">
               <div className="row-between">
                 <div>
@@ -401,7 +661,7 @@ function SearchPageContent() {
                     onClick={() => {
                       const nextFilters = { ...filters, tags: removeTagFilter(filters.tags, tag) };
                       setFilters(nextFilters);
-                      pushFilters(nextFilters);
+                      pushSearchState(nextFilters, mode, naturalQuery, naturalSort, naturalSortDirection);
                     }}
                   >
                     {tag} x
@@ -415,7 +675,7 @@ function SearchPageContent() {
                     onClick={() => {
                       const nextFilters = { ...filters, auto_tags: removeTagFilter(filters.auto_tags, tag) };
                       setFilters(nextFilters);
-                      pushFilters(nextFilters);
+                      pushSearchState(nextFilters, mode, naturalQuery, naturalSort, naturalSortDirection);
                     }}
                   >
                     auto:{tag} x
@@ -435,9 +695,9 @@ function SearchPageContent() {
                 onSelect={toggleSelection}
                 selectionMode={selectionMode}
                 bulkSelected={bulkMode && bulkSelectedIds.includes(asset.id)}
-                onBulkToggle={bulkMode ? () => setBulkSelectedIds((ids) => ids.includes(asset.id) ? ids.filter((x) => x !== asset.id) : [...ids, asset.id]) : undefined}
+                onBulkToggle={bulkMode ? () => setBulkSelectedIds((ids) => (ids.includes(asset.id) ? ids.filter((x) => x !== asset.id) : [...ids, asset.id])) : undefined}
                 onAddToCollection={
-                  user?.capabilities.can_manage_collections
+                  user?.capabilities.can_manage_collections && collectionsEnabled
                     ? (nextAsset) => {
                         setCollectionMode("selected");
                         setPendingCollectionAssetIds([nextAsset.id]);
@@ -450,7 +710,7 @@ function SearchPageContent() {
                     ? () => void downloadWorkflow(asset.id, asset.filename)
                     : undefined
                 }
-                onTagged={() => void load(filters, page, false)}
+                onTagged={() => void load(filters, 1, false, mode, naturalQuery, naturalSort, naturalSortDirection)}
               />
             ))}
           </div>
@@ -461,8 +721,14 @@ function SearchPageContent() {
                 {selected.length ? <p className="subdued">{selected.length} selected for compare</p> : null}
                 {loadingMore ? <p className="subdued">Loading more…</p> : null}
               </div>
-              {!hasMore && results.items.length ? <p className="subdued">You reached the end of the indexed feed.</p> : null}
-              {!results.items.length && !loading ? <p className="subdued">No indexed assets match these filters yet.</p> : null}
+              {!hasMore && results.items.length && mode === "tag" ? <p className="subdued">You reached the end of the indexed feed.</p> : null}
+              {!results.items.length && !loading ? (
+                <p className="subdued">
+                  {mode === "nl" && !naturalQuery.trim()
+                    ? "Enter a natural-language prompt to search by visual meaning."
+                    : "No indexed assets match this search yet."}
+                </p>
+              ) : null}
               <div ref={sentinelRef} className="infinite-sentinel" />
             </section>
           ) : null}
@@ -476,7 +742,7 @@ export default function SearchPage() {
   return (
     <Suspense
       fallback={
-        <AppShell title="Search" description="Indexed discovery with metadata filters, prompt tags, and exact tag search.">
+        <AppShell title="Search" description="Indexed discovery across exact metadata filters and natural-language semantic search.">
           <section className="panel empty-state">Loading search…</section>
         </AppShell>
       }

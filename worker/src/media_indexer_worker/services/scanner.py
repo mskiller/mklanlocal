@@ -11,8 +11,11 @@ from sqlalchemy.dialects.postgresql import insert
 from media_indexer_backend.core.config import get_settings
 from media_indexer_backend.db.session import SessionLocal
 from media_indexer_backend.models.enums import MediaType, ScanStatus, SourceStatus
-from media_indexer_backend.models.tables import Asset, AssetMetadata, AssetSearch, AssetSimilarity, AssetTag, ScanJob, Source
+from media_indexer_backend.models.tables import Asset, AssetMetadata, AssetSearch, AssetSimilarity, AssetTag, FaceDetection, ScanJob, Source
+from media_indexer_backend.platform.events import publish_event
+from media_indexer_backend.platform.runtime import get_ai_tagging_runtime_settings, get_people_runtime_settings
 from media_indexer_backend.services.audit import record_audit_event
+from media_indexer_backend.services.character_cards import extract_character_card_from_raw_metadata, sync_character_card_record
 from media_indexer_backend.services.image_enrichment import get_image_enrichment_service
 from media_indexer_backend.services.metadata import (
     build_search_text,
@@ -26,7 +29,9 @@ from media_indexer_backend.services.metadata import (
 )
 from media_indexer_backend.services.path_safety import validate_source_root
 from media_indexer_backend.services.source_service import reconcile_source_statuses
+from media_indexer_backend.services.webhook_service import dispatch_webhook_event
 from media_indexer_worker.services.extractors import extract_exiftool, extract_ffprobe, extract_png_metadata_chunks
+from media_indexer_worker.services.faces import FaceEnrichmentService
 from media_indexer_worker.services.nsfw import NsfwDetectorService
 from media_indexer_worker.services.previews import PreviewGenerator
 from media_indexer_worker.services.similarity import SimilarityService
@@ -42,6 +47,7 @@ class ScanWorker:
         self.similarity = SimilarityService()
         self.nsfw_detector = NsfwDetectorService()
         self.image_enrichment = get_image_enrichment_service()
+        self.face_enrichment = FaceEnrichmentService()
 
     def run_forever(self) -> None:
         logger.info("worker loop started")
@@ -117,6 +123,7 @@ class ScanWorker:
                     resource_id=job.id,
                     details={"source_id": str(source.id), "candidate_count": total},
                 )
+                dispatch_webhook_event("scan.started", {"job_id": str(job.id), "source_id": str(source.id)})
                 session.commit()
 
                 for index, path in enumerate(candidates, start=1):
@@ -168,6 +175,7 @@ class ScanWorker:
                 session.commit()
                 deleted_count = self._delete_missing_assets(session, source.id, existing_assets, discovered_paths)
                 job.deleted_count += deleted_count
+                publish_event(session, "scan.completed", {"source_id": str(source.id), "job_id": str(job.id)})
                 job.status = ScanStatus.COMPLETED
                 job.progress = 100
                 job.finished_at = datetime.now(tz=timezone.utc)
@@ -184,6 +192,17 @@ class ScanWorker:
                     resource_type="scan_job",
                     resource_id=job.id,
                     details={
+                        "source_id": str(source.id),
+                        "new_count": job.new_count,
+                        "updated_count": job.updated_count,
+                        "deleted_count": job.deleted_count,
+                        "error_count": job.error_count,
+                    },
+                )
+                dispatch_webhook_event(
+                    "scan.completed",
+                    {
+                        "job_id": str(job.id),
                         "source_id": str(source.id),
                         "new_count": job.new_count,
                         "updated_count": job.updated_count,
@@ -210,6 +229,10 @@ class ScanWorker:
                         resource_type="scan_job",
                         resource_id=job.id,
                         details={"error": str(exc)},
+                    )
+                    dispatch_webhook_event(
+                        "scan.failed",
+                        {"job_id": str(job.id), "source_id": str(job.source_id), "error": str(exc)},
                     )
                     session.commit()
 
@@ -325,6 +348,13 @@ class ScanWorker:
                 )
             )
 
+        sync_character_card_record(
+            session,
+            asset.id,
+            extract_character_card_from_raw_metadata(exif),
+            extracted_at=datetime.now(tz=timezone.utc),
+        )
+
         tags = build_tags(normalized, exif)
         
         if media_type == MediaType.IMAGE:
@@ -356,16 +386,36 @@ class ScanWorker:
         if content_changed or not preview_exists or (media_type == MediaType.IMAGE and not asset.blur_hash):
             job.message = f"Generating preview: {relative_path}"
             session.commit()
-            asset.preview_path, asset.blur_hash = self.previews.generate(asset.id, media_type, path)
+            video_timestamp = None
+            if media_type == MediaType.VIDEO:
+                duration_seconds = normalized.get("duration_seconds")
+                if isinstance(duration_seconds, (int, float)) and duration_seconds > 0:
+                    video_timestamp = float(duration_seconds) * 0.1
+            asset.preview_path, asset.blur_hash = self.previews.generate(
+                asset.id,
+                media_type,
+                path,
+                video_timestamp_seconds=video_timestamp,
+            )
+            if media_type == MediaType.VIDEO:
+                waveform_path, keyframes = self.previews.generate_video_artifacts(
+                    asset.id,
+                    path,
+                    duration_seconds=normalized.get("duration_seconds") if isinstance(normalized.get("duration_seconds"), (int, float)) else None,
+                )
+                asset.waveform_preview_path = waveform_path
+                asset.video_keyframes = keyframes or None
 
         similarity_record = session.get(AssetSimilarity, asset.id) if media_type == MediaType.IMAGE else None
+        ai_runtime = get_ai_tagging_runtime_settings()
+        people_runtime = get_people_runtime_settings()
         needs_similarity_refresh = (
             media_type == MediaType.IMAGE
             and (
                 content_changed
                 or similarity_record is None
                 or similarity_record.phash is None
-                or (self.settings.clip_enabled and similarity_record.embedding is None)
+                or (ai_runtime.clip_enabled and similarity_record.embedding is None)
             )
         )
         if needs_similarity_refresh:
@@ -376,7 +426,8 @@ class ScanWorker:
             self.similarity.refresh_tag_links(session, asset.id)
 
         needs_image_enrichment = (
-            media_type == MediaType.IMAGE
+            ai_runtime.module_enabled
+            and media_type == MediaType.IMAGE
             and (
                 content_changed
                 or existing is None
@@ -391,7 +442,27 @@ class ScanWorker:
             job.message = f"Enriching image: {relative_path}"
             session.commit()
             self.image_enrichment.enrich_asset(session, asset, path)
+        existing_face_count = session.execute(
+            select(func.count(FaceDetection.id)).where(FaceDetection.asset_id == asset.id)
+        ).scalar_one()
+        needs_face_refresh = (
+            media_type == MediaType.IMAGE
+            and people_runtime.face_detection_enabled
+            and (
+                content_changed
+                or existing is None
+                or existing_face_count == 0
+            )
+        )
+        if needs_face_refresh:
+            job.message = f"Detecting faces: {relative_path}"
+            session.commit()
+            self.face_enrichment.refresh_asset_faces(session, asset, path)
 
+        dispatch_webhook_event(
+            "asset.updated" if existing else "asset.indexed",
+            {"asset_id": str(asset.id), "source_id": str(source.id), "filename": asset.filename},
+        )
         session.commit()
 
     def _delete_missing_assets(
@@ -406,6 +477,7 @@ class ScanWorker:
             if relative_path in discovered_paths:
                 continue
             self.previews.cleanup(asset.id, asset.preview_path)
+            self.face_enrichment.delete_asset_faces(session, asset.id)
             session.delete(asset)
             deleted_count += 1
         session.commit()

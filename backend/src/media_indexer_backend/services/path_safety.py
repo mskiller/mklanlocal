@@ -11,17 +11,30 @@ def validate_source_root(root_path: str) -> str:
     settings = get_settings()
     candidate = Path(root_path).expanduser()
     if not candidate.is_absolute():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source root must be absolute.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source root must be an absolute server path such as /data/sources/photos.",
+        )
 
     resolved = candidate.resolve(strict=False)
     if not resolved.exists() or not resolved.is_dir():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source root does not exist on the server.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Source root does not exist on the server. "
+                "If you are using Docker, mount the host folder into the backend and worker containers "
+                "and then use the container path, for example /data/sources/photos."
+            ),
+        )
 
     allowed = settings.allowed_source_root_paths
     if not any(resolved == base or resolved.is_relative_to(base) for base in allowed):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Source root is outside the approved server roots.",
+            detail=(
+                "Source root is outside the approved server roots. "
+                f"Allowed roots: {', '.join(str(base) for base in allowed)}."
+            ),
         )
     return str(resolved)
 
