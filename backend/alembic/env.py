@@ -5,10 +5,11 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from media_indexer_backend.addons import models as addon_models  # noqa: F401
 from media_indexer_backend.core.config import get_settings
 from media_indexer_backend.db.base import Base
 from media_indexer_backend.models import tables  # noqa: F401
-from media_indexer_backend.platform.registry import iter_backend_migration_locations
+from media_indexer_backend.platform.registry import ensure_runtime_import_paths, iter_backend_migration_locations
 
 
 config = context.config
@@ -19,6 +20,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+ensure_runtime_import_paths("backend")
 version_locations = iter_backend_migration_locations()
 
 

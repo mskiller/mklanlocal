@@ -22,6 +22,8 @@ COPY backend/README.md /workspace/backend/README.md
 COPY backend/alembic.ini /workspace/backend/alembic.ini
 COPY backend/alembic /workspace/backend/alembic
 COPY backend/src /workspace/backend/src
+COPY addons.toml /workspace/addons.toml
+COPY addons /workspace/addons
 COPY worker/pyproject.toml /workspace/worker/pyproject.toml
 COPY worker/README.md /workspace/worker/README.md
 COPY worker/src /workspace/worker/src

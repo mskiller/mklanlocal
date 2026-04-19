@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 import tomllib
 
 from media_indexer_backend.platform.manifest import ModuleManifest, ModuleSettingField
@@ -12,7 +13,10 @@ MANIFEST_DIR = Path(__file__).resolve().parent / "manifests"
 def find_repo_root(start: Path | None = None) -> Path:
     current = (start or Path(__file__).resolve()).parent
     for candidate in [current, *current.parents]:
-        if (candidate / "infra" / "docker-compose.yml").exists() and (candidate / "backend").exists():
+        has_backend_dir = (candidate / "backend").exists()
+        has_compose_layout = (candidate / "infra" / "docker-compose.yml").exists()
+        has_addon_layout = (candidate / "addons.toml").exists()
+        if has_backend_dir and (has_compose_layout or has_addon_layout):
             return candidate
     return Path.cwd()
 
@@ -145,6 +149,39 @@ def discover_module_manifests(repo_root: Path | None = None) -> list[ModuleManif
 
 def discover_manifest_map(repo_root: Path | None = None) -> dict[str, ModuleManifest]:
     return {manifest.id: manifest for manifest in discover_module_manifests(repo_root=repo_root)}
+
+
+def iter_runtime_import_paths(runtime: str, repo_root: Path | None = None) -> list[str]:
+    if runtime not in {"backend", "worker"}:
+        return []
+
+    paths: list[str] = []
+    for manifest in discover_module_manifests(repo_root=repo_root):
+        if manifest.kind != "addon" or not manifest.manifest_path:
+            continue
+        manifest_dir = Path(manifest.manifest_path).resolve(strict=False).parent
+        candidates = []
+        if runtime == "backend":
+            candidates.extend([manifest_dir / "backend" / "src", manifest_dir / "src"])
+        else:
+            candidates.extend([manifest_dir / "worker" / "src", manifest_dir / "src"])
+        for candidate in candidates:
+            if not candidate.exists():
+                continue
+            resolved = str(candidate.resolve(strict=False))
+            if resolved not in paths:
+                paths.append(resolved)
+    return paths
+
+
+def ensure_runtime_import_paths(runtime: str, repo_root: Path | None = None) -> list[str]:
+    added: list[str] = []
+    for import_path in iter_runtime_import_paths(runtime, repo_root=repo_root):
+        if import_path in sys.path:
+            continue
+        sys.path.insert(0, import_path)
+        added.append(import_path)
+    return added
 
 
 def iter_backend_router_refs(repo_root: Path | None = None) -> list[str]:

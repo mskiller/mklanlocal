@@ -720,3 +720,59 @@ export interface PlatformModule {
   installed_at: string;
   updated_at: string;
 }
+
+export interface AddonPreset {
+  id: string;
+  module_id: string;
+  name: string;
+  description: string | null;
+  version: number;
+  is_builtin: boolean;
+  config_json: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AddonArtifact {
+  id: string;
+  module_id: string;
+  job_id: string;
+  asset_id: string | null;
+  preset_id: string | null;
+  status: string;
+  label: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  width: number | null;
+  height: number | null;
+  source_checksum: string | null;
+  params_hash: string;
+  recipe_version: number;
+  metadata_json: Record<string, unknown>;
+  content_url: string;
+  promoted_inbox_path: string | null;
+  promoted_at: string | null;
+  created_at: string;
+}
+
+export interface AddonJob {
+  id: string;
+  module_id: string;
+  created_by: string;
+  preset_id: string | null;
+  scope_type: string;
+  scope_json: Record<string, unknown>;
+  params_json: Record<string, unknown>;
+  status: string;
+  progress: number;
+  message: string | null;
+  error_message: string | null;
+  artifact_count: number;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+  artifacts: AddonArtifact[];
+}

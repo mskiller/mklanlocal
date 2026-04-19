@@ -1,0 +1,68 @@
+id = "upscale_restore"
+name = "Upscale + Restore"
+version = "0.1.0"
+description = "Create cached x2/x4 upscale derivatives with light denoise and sharpening."
+platform_api_version = "1"
+enabled_by_default = true
+permissions = ["upscale_restore.read", "upscale_restore.write"]
+dependencies = []
+
+[entrypoints]
+backend = "mklan_addon_upscale_restore.backend:register"
+worker = "mklan_addon_upscale_restore.worker:register"
+frontend = "mklan-addon-upscale-restore"
+
+[contributions]
+api_mount = "/modules/upscale_restore"
+user_mount = "/modules/upscale_restore"
+admin_mount = "/admin/modules/upscale_restore"
+nav_label = "Upscale + Restore"
+nav_href = "/modules/upscale_restore"
+nav_order = 82
+admin_nav_label = "Upscale + Restore"
+admin_nav_href = "/admin/modules/upscale_restore"
+admin_nav_order = 82
+user_visible = true
+admin_visible = true
+
+[[settings.fields]]
+key = "backend"
+label = "Backend"
+type = "string"
+default = "pillow-lanczos"
+description = "Execution backend label surfaced in the admin console."
+
+[[settings.fields]]
+key = "device"
+label = "Device"
+type = "string"
+default = "cpu"
+description = "Reserved for future ESRGAN-style worker backends."
+
+[[settings.fields]]
+key = "output_format"
+label = "Output Format"
+type = "string"
+default = "png"
+description = "Output format used for restored derivatives."
+
+[[settings.fields]]
+key = "max_input_size"
+label = "Max Input Size"
+type = "integer"
+default = 4096
+description = "Largest input dimension processed before scaling."
+
+[[settings.fields]]
+key = "concurrency"
+label = "Concurrency"
+type = "integer"
+default = 2
+description = "Reserved queue concurrency for future worker-backed execution."
+
+[[settings.fields]]
+key = "retention_policy"
+label = "Retention Policy"
+type = "string"
+default = "cache-by-settings"
+description = "How generated upscale artifacts are retained."

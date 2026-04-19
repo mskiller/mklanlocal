@@ -1,0 +1,68 @@
+id = "metadata_privacy"
+name = "Metadata Privacy"
+version = "0.1.0"
+description = "Inspect, strip, and selectively preserve metadata for share-safe derivatives."
+platform_api_version = "1"
+enabled_by_default = true
+permissions = ["metadata_privacy.read", "metadata_privacy.write"]
+dependencies = []
+
+[entrypoints]
+backend = "mklan_addon_metadata_privacy.backend:register"
+worker = "mklan_addon_metadata_privacy.worker:register"
+frontend = "mklan-addon-metadata-privacy"
+
+[contributions]
+api_mount = "/modules/metadata_privacy"
+user_mount = "/modules/metadata_privacy"
+admin_mount = "/admin/modules/metadata_privacy"
+nav_label = "Metadata Privacy"
+nav_href = "/modules/metadata_privacy"
+nav_order = 79
+admin_nav_label = "Metadata Privacy"
+admin_nav_href = "/admin/modules/metadata_privacy"
+admin_nav_order = 79
+user_visible = true
+admin_visible = true
+
+[[settings.fields]]
+key = "backend"
+label = "Backend"
+type = "string"
+default = "pillow-sanitizer"
+description = "Execution backend label surfaced in the admin console."
+
+[[settings.fields]]
+key = "device"
+label = "Device"
+type = "string"
+default = "cpu"
+description = "Reserved for future metadata backends."
+
+[[settings.fields]]
+key = "output_format"
+label = "Output Format"
+type = "string"
+default = "png"
+description = "Output format used for sanitized derivatives."
+
+[[settings.fields]]
+key = "max_input_size"
+label = "Max Input Size"
+type = "integer"
+default = 4096
+description = "Largest input dimension processed before export."
+
+[[settings.fields]]
+key = "concurrency"
+label = "Concurrency"
+type = "integer"
+default = 2
+description = "Reserved queue concurrency for future worker-backed execution."
+
+[[settings.fields]]
+key = "retention_policy"
+label = "Retention Policy"
+type = "string"
+default = "keep-latest"
+description = "How sanitized exports and reports are retained."
