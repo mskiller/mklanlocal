@@ -1,6 +1,9 @@
 import {
   AdminHealthResponse,
   AdminSettings,
+  AddonArtifact,
+  AddonJob,
+  AddonPreset,
   ApiTokenCreateResponse,
   ApiTokenSummary,
   AssetBrowseItem,
@@ -380,6 +383,62 @@ export function updateAdminModule(
 export function rescanAdminModules() {
   return apiFetch<PlatformModule[]>("/admin/modules/rescan", {
     method: "POST",
+  });
+}
+
+export function fetchAddonJobs(moduleId: string, limit = 20) {
+  return apiFetch<AddonJob[]>(`/modules/${encodeURIComponent(moduleId)}/jobs?limit=${limit}`);
+}
+
+export function createAddonJob(
+  moduleId: string,
+  payload: {
+    asset_id?: string;
+    asset_ids?: string[];
+    collection_id?: string;
+    preset_id?: string;
+    params_json?: Record<string, unknown>;
+  }
+) {
+  return apiFetch<AddonJob>(`/modules/${encodeURIComponent(moduleId)}/jobs`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchAddonAssetArtifacts(moduleId: string, assetId: string) {
+  return apiFetch<AddonArtifact[]>(`/modules/${encodeURIComponent(moduleId)}/assets/${assetId}/artifacts`);
+}
+
+export function promoteAddonArtifact(moduleId: string, artifactId: string, folder?: string) {
+  const query = buildQuery({ folder });
+  return apiFetch<SourceUploadResponse>(`/modules/${encodeURIComponent(moduleId)}/artifacts/${artifactId}/promote${query}`, {
+    method: "POST",
+  });
+}
+
+export function fetchAddonPresets(moduleId: string) {
+  return apiFetch<AddonPreset[]>(`/modules/${encodeURIComponent(moduleId)}/presets`);
+}
+
+export function createAddonPreset(
+  moduleId: string,
+  payload: { name: string; description?: string | null; config_json?: Record<string, unknown> }
+) {
+  return apiFetch<AddonPreset>(`/modules/${encodeURIComponent(moduleId)}/presets`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateAddonPreset(
+  moduleId: string,
+  presetId: string,
+  payload: { name?: string; description?: string | null; config_json?: Record<string, unknown> }
+) {
+  return apiFetch<AddonPreset>(`/modules/${encodeURIComponent(moduleId)}/presets/${presetId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
   });
 }
 

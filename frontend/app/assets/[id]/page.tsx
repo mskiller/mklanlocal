@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { AddonQuickActions } from "@/components/addon-quick-actions";
 import { AppShell } from "@/components/app-shell";
 import { AssetCard } from "@/components/asset-card";
 import { CollectionPickerModal } from "@/components/collection-picker-modal";
@@ -220,6 +221,7 @@ export default function AssetDetailPage() {
                   {busyExtracting ? "Processing..." : "✨ Visual OCR Extraction"}
                 </button>
               </div>
+              <AddonQuickActions assetId={asset.id} title="Asset Addons" />
             </div>
 
             {user?.capabilities.can_manage_collections && collectionsEnabled && asset ? (

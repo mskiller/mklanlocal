@@ -14,6 +14,8 @@ COPY backend/README.md /workspace/backend/README.md
 COPY backend/alembic.ini /workspace/backend/alembic.ini
 COPY backend/alembic /workspace/backend/alembic
 COPY backend/src /workspace/backend/src
+COPY addons.toml /workspace/addons.toml
+COPY addons /workspace/addons
 
 RUN pip install --no-cache-dir -e /workspace/backend
 

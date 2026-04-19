@@ -4,7 +4,7 @@ from importlib import import_module
 
 from fastapi import APIRouter
 
-from media_indexer_backend.api.routes import admin, assets, auth, compare, export, health, inbox, modules, scan_jobs, search, shares, sources, tags, timeline
+from media_indexer_backend.api.routes import addon_tools, admin, assets, auth, compare, export, health, inbox, modules, scan_jobs, search, shares, sources, tags, timeline
 from media_indexer_backend.platform.registry import iter_backend_router_refs
 
 
@@ -13,6 +13,7 @@ CORE_ROUTERS = [
     auth.router,
     admin.router,
     modules.router,
+    addon_tools.router,
     sources.router,
     scan_jobs.router,
     assets.router,

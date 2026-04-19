@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
+import { AddonQuickActions } from "@/components/addon-quick-actions";
 import { AppShell } from "@/components/app-shell";
 import { CompareSelectionTray } from "@/components/compare-selection-tray";
 import { GalleryTile } from "@/components/gallery-tile";
@@ -108,6 +109,7 @@ export default function CollectionDetailPage() {
             activeIndex={explorerIndex ?? 0}
             onClose={() => setExplorerIndex(null)}
             onActiveIndexChange={(next) => setExplorerIndex(next)}
+            renderActions={(item) => <AddonQuickActions assetId={item.key} />}
           />
           <CompareSelectionTray
             selectionMode={selectionMode}
@@ -184,6 +186,7 @@ export default function CollectionDetailPage() {
                 <p className="eyebrow">Collection Gallery</p>
                 <h2>{collection.total} images</h2>
               </div>
+              <AddonQuickActions collectionId={collection.id} title="Collection Addons" />
             </div>
             <div className="gallery-grid">
               {collection.items.map((item) => {

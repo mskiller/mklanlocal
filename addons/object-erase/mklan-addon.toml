@@ -1,0 +1,68 @@
+id = "object_erase"
+name = "Object Erase"
+version = "0.1.0"
+description = "Apply saved rectangle masks and generate erased draft variants for review."
+platform_api_version = "1"
+enabled_by_default = true
+permissions = ["object_erase.read", "object_erase.write"]
+dependencies = []
+
+[entrypoints]
+backend = "mklan_addon_object_erase.backend:register"
+worker = "mklan_addon_object_erase.worker:register"
+frontend = "mklan-addon-object-erase"
+
+[contributions]
+api_mount = "/modules/object_erase"
+user_mount = "/modules/object_erase"
+admin_mount = "/admin/modules/object_erase"
+nav_label = "Object Erase"
+nav_href = "/modules/object_erase"
+nav_order = 83
+admin_nav_label = "Object Erase"
+admin_nav_href = "/admin/modules/object_erase"
+admin_nav_order = 83
+user_visible = true
+admin_visible = true
+
+[[settings.fields]]
+key = "backend"
+label = "Backend"
+type = "string"
+default = "pillow-fill"
+description = "Execution backend label surfaced in the admin console."
+
+[[settings.fields]]
+key = "device"
+label = "Device"
+type = "string"
+default = "cpu"
+description = "Reserved for future inpainting backends."
+
+[[settings.fields]]
+key = "output_format"
+label = "Output Format"
+type = "string"
+default = "png"
+description = "Output format used for erased draft exports."
+
+[[settings.fields]]
+key = "max_input_size"
+label = "Max Input Size"
+type = "integer"
+default = 4096
+description = "Largest input dimension processed before masking."
+
+[[settings.fields]]
+key = "concurrency"
+label = "Concurrency"
+type = "integer"
+default = 1
+description = "Reserved queue concurrency for future worker-backed execution."
+
+[[settings.fields]]
+key = "retention_policy"
+label = "Retention Policy"
+type = "string"
+default = "keep-history"
+description = "How erased variants and saved masks are retained."

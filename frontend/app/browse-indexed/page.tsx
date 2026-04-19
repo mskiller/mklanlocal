@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { AddonQuickActions } from "@/components/addon-quick-actions";
 import { AppShell } from "@/components/app-shell";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { CompareSelectionTray } from "@/components/compare-selection-tray";
@@ -399,6 +400,7 @@ export default function BrowseIndexedPage() {
                   Copy Danbooru Tags
                 </button>
               </div>
+              <AddonQuickActions assetId={sourceItem.id} />
               {/* M4 — Generation Tools group */}
               {sourceItem.workflow_export_available ? (
                 <div>

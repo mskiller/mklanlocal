@@ -126,6 +126,54 @@ def ingest_uploads_to_inbox(
     return created
 
 
+def ingest_generated_file_to_inbox(
+    session: Session,
+    *,
+    folder: str | None,
+    filename: str,
+    content: bytes,
+) -> InboxItem:
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file content was generated.")
+
+    safe_name = Path(filename).name.strip()
+    if not safe_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Generated file must have a filename.")
+
+    media_type = detect_media_type(Path(safe_name), guess_mime_type(Path(safe_name)))
+    if media_type == MediaType.UNKNOWN:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{safe_name} is not a supported media file.")
+
+    source = _upload_source(session)
+    default_target = _default_target_source(session)
+    target_directory, normalized_folder = resolve_writable_directory_path(source.root_path, folder)
+    target_directory.mkdir(parents=True, exist_ok=True)
+
+    relative_path = normalize_relative_path(f"{normalized_folder}/{safe_name}" if normalized_folder else safe_name)
+    destination = target_directory / safe_name
+    suffix = destination.suffix
+    stem = destination.stem
+    counter = 1
+    while destination.exists():
+        destination = target_directory / f"{stem}-{counter}{suffix}"
+        relative_path = normalize_relative_path(
+            f"{normalized_folder}/{destination.name}" if normalized_folder else destination.name
+        )
+        counter += 1
+    destination.write_bytes(content)
+
+    item = InboxItem(
+        filename=destination.name,
+        inbox_path=relative_path,
+        file_size=len(content),
+        status="pending",
+        target_source_id=default_target.id if default_target is not None else None,
+    )
+    session.add(item)
+    session.flush()
+    return item
+
+
 def approve_inbox_item(
     session: Session,
     item_id: UUID,
